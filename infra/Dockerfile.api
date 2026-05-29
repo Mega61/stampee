@@ -1,0 +1,37 @@
+# Build context MUST be the repo root so the image can copy both api/ and db/.
+#   docker build -f infra/Dockerfile.api -t stampee-api:<tag> .
+
+# ---------- stage 1: build ----------
+FROM node:20-alpine AS builder
+WORKDIR /build
+
+# Install deps from lockfile so the build is reproducible.
+COPY api/package.json api/package-lock.json ./
+RUN npm ci
+
+COPY api/tsconfig.json ./
+COPY api/src ./src
+RUN npm run build
+
+# ---------- stage 2: runtime ----------
+FROM node:20-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Production dependencies only.
+COPY api/package.json api/package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Compiled JS + SQL migrations bundled together so the one-shot migrate
+# service has everything it needs without an extra volume mount.
+COPY --from=builder /build/dist ./dist
+COPY db/migrations ./db/migrations
+
+# Drop privileges. The `node` user is created by the official node:alpine image.
+USER node
+
+EXPOSE 3001
+
+# Sensible default. The compose `migrate` service overrides with
+# `node dist/scripts/migrate.js`.
+CMD ["node", "dist/server.js"]

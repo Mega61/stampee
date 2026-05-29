@@ -6,17 +6,15 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useAuth } from "./AuthProvider";
 import { trackEvent } from "../lib/analytics";
-import { DEMO_WORKSPACE_ENABLED } from "../lib/siteConfig";
 
 const inputCls =
   "h-12 rounded-xl border-black/[0.1] bg-[#f5f5f7] text-[#1d1d1f] placeholder:text-[#6e6e73]/50 focus-visible:border-[#1d1d1f] focus-visible:ring-0";
 const labelCls = "block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73]";
 
 export const LoginClassicPage: React.FC = () => {
-  const { currentUser, loading, login, loginDemo } = useAuth();
+  const { currentUser, loading, login } = useAuth();
   const location = useLocation();
   const fromPath = (location.state as { from?: { pathname?: string } })?.from?.pathname;
-  const showDemoWorkspace = DEMO_WORKSPACE_ENABLED && new URLSearchParams(location.search).get("admin") === "pogi";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,18 +54,6 @@ export const LoginClassicPage: React.FC = () => {
       }
     } catch {
       setError("Unable to sign in right now. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDemo = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      await withTimeout(loginDemo());
-    } catch {
-      setError("Unable to sign in to demo right now. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -138,27 +124,6 @@ export const LoginClassicPage: React.FC = () => {
         </Button>
         {loading && !busy && (
           <p className="text-center text-xs text-[#6e6e73]">Checking existing session...</p>
-        )}
-
-        {showDemoWorkspace && (
-          <>
-            <div className="relative py-1">
-              <div className="border-t border-black/[0.08]" />
-              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]">
-                or
-              </span>
-            </div>
-
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isDisabled}
-              className="h-12 w-full rounded-full border-black/[0.1] bg-white text-base font-medium text-[#1d1d1f] hover:bg-[#f5f5f7]"
-              onClick={handleDemo}
-            >
-              Try Demo Workspace
-            </Button>
-          </>
         )}
 
         <p className="text-center text-sm text-[#6e6e73]">

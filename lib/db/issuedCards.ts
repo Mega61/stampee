@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { api, ApiError } from '../api';
 import type { IssuedCard, Transaction, StoredTemplate } from '../../types';
 
 export type ScannedCardStatus = 'owned' | 'foreign' | 'missing';
@@ -23,134 +23,98 @@ export async function insertIssuedCard(
     campaignName: string;
     templateSnapshot?: StoredTemplate;
   },
-  ownerId: string
+  _ownerId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase.from('issued_cards').insert({
-    id: card.id,
-    unique_id: card.uniqueId,
-    customer_id: card.customerId,
-    campaign_id: card.campaignId,
-    owner_id: ownerId,
-    campaign_name: card.campaignName,
-    stamps: 0,
-    last_visit: new Date().toISOString().split('T')[0],
-    status: 'Active',
-    template_snapshot: card.templateSnapshot ?? null,
-  });
-  if (error) {
-    if (error.message.includes('CAMPAIGN_DISABLED')) {
+  try {
+    await api.post('/cards', card);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ApiError && err.code === 'CAMPAIGN_DISABLED') {
       return { ok: false, error: 'This campaign is disabled and cannot issue new cards.' };
     }
-    return { ok: false, error: 'Unable to issue this card right now. Please try again.' };
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to issue this card right now. Please try again.';
+    return { ok: false, error: message };
   }
-  return { ok: true };
 }
 
 export async function updateIssuedCard(
   cardId: string,
-  updates: Partial<Pick<IssuedCard, 'stamps' | 'status' | 'completedDate' | 'lastVisit'>>
+  updates: Partial<Pick<IssuedCard, 'stamps' | 'status' | 'completedDate' | 'lastVisit'>>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const row: Record<string, unknown> = {};
-  if (updates.stamps !== undefined) row.stamps = updates.stamps;
-  if (updates.status !== undefined) row.status = updates.status;
-  if (updates.completedDate !== undefined) row.completed_date = updates.completedDate;
-  if (updates.lastVisit !== undefined) row.last_visit = updates.lastVisit;
-
-  const { error } = await supabase
-    .from('issued_cards')
-    .update(row)
-    .eq('id', cardId);
-  if (error) return { ok: false, error: 'Unable to update this card right now. Please try again.' };
-  return { ok: true };
+  try {
+    await api.patch(`/cards/${cardId}`, updates);
+    return { ok: true };
+  } catch (err) {
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to update this card right now. Please try again.';
+    return { ok: false, error: message };
+  }
 }
 
 export async function deleteIssuedCard(cardId: string): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase
-    .from('issued_cards')
-    .delete()
-    .eq('id', cardId);
-  if (error) return { ok: false, error: 'Unable to revoke this card right now. Please try again.' };
-  return { ok: true };
+  try {
+    await api.delete(`/cards/${cardId}`);
+    return { ok: true };
+  } catch (err) {
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to revoke this card right now. Please try again.';
+    return { ok: false, error: message };
+  }
 }
 
 export async function insertTransaction(
   cardId: string,
-  tx: Transaction
+  tx: Transaction,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase.from('transactions').insert({
-    id: tx.id,
-    card_id: cardId,
-    type: tx.type,
-    amount: tx.amount,
-    date: tx.date,
-    timestamp: tx.timestamp,
-    title: tx.title,
-    remarks: tx.remarks ?? null,
-    actor_id: tx.actorId ?? null,
-    actor_name: tx.actorName ?? null,
-    actor_role: tx.actorRole ?? null,
-  });
-  if (error) return { ok: false, error: 'Unable to save this activity right now. Please try again.' };
-  return { ok: true };
+  try {
+    await api.post(`/cards/${cardId}/transactions`, {
+      id: tx.id,
+      type: tx.type,
+      amount: tx.amount,
+      date: tx.date,
+      timestamp: tx.timestamp,
+      title: tx.title,
+      remarks: tx.remarks ?? null,
+    });
+    return { ok: true };
+  } catch (err) {
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to save this activity right now. Please try again.';
+    return { ok: false, error: message };
+  }
 }
 
-export async function countIssuedCards(ownerId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('issued_cards')
-    .select('*', { count: 'exact', head: true })
-    .eq('owner_id', ownerId);
-  if (error) return 0;
-  return count ?? 0;
+export async function countIssuedCards(_ownerId: string): Promise<number> {
+  try {
+    const data = await api.get<{ count: number }>('/cards/count');
+    return data?.count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
-export async function inspectScannedCard(uniqueId: string): Promise<{ status: ScannedCardStatus; error?: string }> {
-  const { data, error } = await supabase.rpc('inspect_scanned_card', {
-    card_unique_id: uniqueId,
-  });
-  if (error) {
+export async function inspectScannedCard(
+  uniqueId: string,
+): Promise<{ status: ScannedCardStatus; error?: string }> {
+  try {
+    const data = await api.get<{ status: ScannedCardStatus }>(`/scan/inspect/${uniqueId}`);
+    if (data.status === 'owned' || data.status === 'foreign' || data.status === 'missing') {
+      return { status: data.status };
+    }
+    return { status: 'missing' };
+  } catch {
     return { status: 'missing', error: 'Unable to validate this card right now. Please try again.' };
   }
-
-  const status = typeof data === 'object' && data && 'status' in data
-    ? (data as { status?: string }).status
-    : undefined;
-
-  if (status === 'owned' || status === 'foreign' || status === 'missing') {
-    return { status };
-  }
-
-  return { status: 'missing' };
 }
 
 export async function fetchPublicScanEntryContext(
   slug: string,
-  uniqueId: string
+  uniqueId: string,
 ): Promise<PublicScanEntryContext | null> {
-  const { data, error } = await supabase.rpc('get_scan_entry_context', {
-    slug_input: slug,
-    card_unique_id: uniqueId,
-  });
-  if (error || !data || typeof data !== 'object') {
+  try {
+    return await api.get<PublicScanEntryContext>(`/public/scan/${slug}/${uniqueId}`);
+  } catch {
     return null;
   }
-
-  const payload = data as {
-    owner?: { id?: string; slug?: string; businessName?: string };
-    card?: { uniqueId?: string };
-  };
-
-  if (!payload.owner?.id || !payload.owner.slug || !payload.card?.uniqueId) {
-    return null;
-  }
-
-  return {
-    owner: {
-      id: payload.owner.id,
-      slug: payload.owner.slug,
-      businessName: payload.owner.businessName ?? '',
-    },
-    card: {
-      uniqueId: payload.card.uniqueId,
-    },
-  };
 }

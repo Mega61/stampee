@@ -89,27 +89,25 @@ export interface Customer {
   cards: IssuedCard[];
 }
 
-// Internal account state. Email confirmation now comes from Supabase auth.
+// Internal account state. Email confirmation runs through the self-hosted API.
 export type AccountStatus = 'unverified' | 'verified';
 export type UserRole = 'owner' | 'staff';
 export type AccessStatus = 'active' | 'disabled';
+// `tier` is dropped in the self-host fork (no monetization). The type alias
+// stays for legacy consumers; everyone is treated as fully unlocked.
 export type SubscriptionTier = 'free' | 'pro';
-
-export const TIER_LIMITS = {
-  free: { campaigns: Infinity, issuedCards: Infinity, staff: Infinity },
-  pro: { campaigns: Infinity, issuedCards: Infinity, staff: Infinity },
-} as const;
 
 export interface User {
   id: string;
   businessName: string;
   email: string;
-  slug?: string;
+  slug?: string | null;
   role: UserRole;
-  ownerId?: string;
+  ownerId?: string | null;
   status: AccountStatus;
   access: AccessStatus;
-  tier: SubscriptionTier;
+  // `tier` is optional and unused — kept here so legacy reads compile.
+  tier?: SubscriptionTier;
   tierExpiresAt?: string;
   createdAt: string;
 }

@@ -15,7 +15,7 @@ import { fetchCampaigns, upsertCampaign, deleteCampaign as dbDeleteCampaign, set
 import { fetchCustomersWithCards } from './lib/db/customers';
 import { fetchPublicScanEntryContext } from './lib/db/issuedCards';
 import { buildIssuedCardsKioskUrl, buildStaffPortalUrl, buildStaffScanEntryUrl } from './lib/links';
-import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { api } from './lib/api';
 import { useSubscription } from './lib/useSubscription';
 import { SubscriptionProvider } from './components/SubscriptionContext';
 import { APP_ORIGIN } from './lib/siteConfig';
@@ -23,7 +23,6 @@ import { APP_ORIGIN } from './lib/siteConfig';
 const SITE_ORIGIN = APP_ORIGIN;
 const DEFAULT_SOCIAL_DESCRIPTION = 'Stampee is a digital loyalty card platform for small businesses, including loyalty program for cafes, loyalty program for spa, loyalty program for laundry, loyalty program for carwash, and loyalty program for salons.';
 const DEFAULT_OG_IMAGE = `${SITE_ORIGIN}/social-preview-v2.jpg`;
-const SERVICE_UNAVAILABLE_MESSAGE = 'Service is temporarily unavailable. Please try again later.';
 
 type SeoConfig = {
   title: string;
@@ -177,60 +176,42 @@ const PublicCardWrapper: React.FC = () => {
   } | null>(null);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !slug || !uniqueId) { setLoading(false); return; }
+    if (!slug || !uniqueId) { setLoading(false); return; }
     (async () => {
-      const { data, error } = await supabase.rpc('get_public_card', {
-        slug_input: slug,
-        card_unique_id: uniqueId,
-      });
-      if (error || !data) { setLoading(false); return; }
+      try {
+        const data = await api.get<{
+          card: IssuedCard;
+          customer: { id: string; name: string };
+          campaign: Record<string, unknown> | null;
+        }>(`/public/cards/${slug}/${uniqueId}`);
 
-      const card: IssuedCard = {
-        id: data.card.id,
-        uniqueId: data.card.uniqueId,
-        campaignId: data.card.campaignId,
-        campaignName: data.card.campaignName,
-        stamps: data.card.stamps,
-        lastVisit: data.card.lastVisit,
-        status: data.card.status,
-        completedDate: data.card.completedDate,
-        history: data.card.history ?? [],
-        templateSnapshot: data.card.templateSnapshot,
-      };
-
-      const customer: Customer = {
-        id: data.customer.id,
-        name: data.customer.name,
-        email: '',
-        status: 'Active',
-        cards: [card],
-      };
-
-      let template: Template | undefined;
-      if (card.templateSnapshot) {
-        template = fromStoredTemplate(card.templateSnapshot);
-      } else if (data.campaign) {
-        const stored = {
-          id: data.campaign.id,
-          name: data.campaign.name,
-          description: data.campaign.description ?? '',
-          rewardName: data.campaign.reward_name ?? '',
-          tagline: data.campaign.tagline,
-          backgroundImage: data.campaign.background_image,
-          backgroundOpacity: data.campaign.background_opacity,
-          logoImage: data.campaign.logo_image,
-          showLogo: data.campaign.show_logo,
-          titleSize: data.campaign.title_size,
-          iconKey: data.campaign.icon_key ?? 'cookie',
-          colors: data.campaign.colors,
-          totalStamps: data.campaign.total_stamps,
-          social: data.campaign.social,
+        const card: IssuedCard = {
+          ...data.card,
+          history: data.card.history ?? [],
         };
-        template = fromStoredTemplate(stored);
-      }
 
-      if (template) setCardData({ card, customer, template });
-      setLoading(false);
+        const customer: Customer = {
+          id: data.customer.id,
+          name: data.customer.name,
+          email: '',
+          status: 'Active',
+          cards: [card],
+        };
+
+        let template: Template | undefined;
+        if (card.templateSnapshot) {
+          template = fromStoredTemplate(card.templateSnapshot);
+        } else if (data.campaign) {
+          // API already returns the campaign in camelCase StoredTemplate shape.
+          template = fromStoredTemplate(data.campaign as Parameters<typeof fromStoredTemplate>[0]);
+        }
+
+        if (template) setCardData({ card, customer, template });
+      } catch {
+        // surface as "Card not found" below
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [slug, uniqueId]);
 
@@ -245,7 +226,7 @@ const PublicCardWrapper: React.FC = () => {
   if (!cardData) {
     return (
       <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        {isSupabaseConfigured ? 'Card not found.' : SERVICE_UNAVAILABLE_MESSAGE}
+        Card not found.
       </div>
     );
   }
@@ -629,11 +610,6 @@ const AppRoutes: React.FC = () => {
 
   return (
     <SubscriptionProvider value={sub}>
-      {!isSupabaseConfigured && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          {SERVICE_UNAVAILABLE_MESSAGE}
-        </div>
-      )}
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Navigate to="/login" replace />} />

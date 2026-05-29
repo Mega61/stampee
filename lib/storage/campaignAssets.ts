@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { api, ApiError } from '../api';
 
 export type CampaignAssetKind = 'logo' | 'background';
 
@@ -9,6 +9,9 @@ type UploadCampaignAssetInput = {
 };
 
 type UploadedCampaignAsset = {
+  // `publicUrl` is what gets stored in the DB. With the private-bucket setup
+  // it's actually the *path* the API returned from presign; the API resolves
+  // it back into a short-lived signed-GET URL on every read.
   publicUrl: string;
   path: string;
 };
@@ -19,7 +22,6 @@ type DeleteCampaignAssetResult = {
   error?: string;
 };
 
-const BUCKET_NAME = 'campaign-assets';
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 const BACKGROUND_MAX_BYTES = 6 * 1024 * 1024;
 const LOGO_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'svg']);
@@ -31,29 +33,6 @@ const LOGO_MIME_TYPES = new Set([
   'image/svg+xml',
 ]);
 const BACKGROUND_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-
-const MIME_TO_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/svg+xml': 'svg',
-};
-
-const getSupabaseOrigin = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL?.trim();
-  if (!url) return null;
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
-};
-
-const getExtensionFromName = (filename: string) => {
-  const parts = filename.toLowerCase().split('.');
-  if (parts.length < 2) return '';
-  return parts[parts.length - 1];
-};
 
 const resolveAllowedRules = (kind: CampaignAssetKind) => {
   if (kind === 'logo') {
@@ -74,94 +53,86 @@ const resolveAllowedRules = (kind: CampaignAssetKind) => {
   };
 };
 
-const resolveFileExtension = (kind: CampaignAssetKind, file: File) => {
-  const rules = resolveAllowedRules(kind);
-  const extensionFromName = getExtensionFromName(file.name);
-  if (extensionFromName && rules.allowedExtensions.has(extensionFromName)) {
-    return extensionFromName;
-  }
-  const extensionFromMime = MIME_TO_EXTENSION[file.type];
-  if (extensionFromMime && rules.allowedExtensions.has(extensionFromMime)) {
-    return extensionFromMime;
-  }
-  throw new Error(rules.typeError);
+const getExtensionFromName = (filename: string) => {
+  const parts = filename.toLowerCase().split('.');
+  if (parts.length < 2) return '';
+  return parts[parts.length - 1];
 };
 
 const validateUploadFile = (kind: CampaignAssetKind, file: File) => {
   const rules = resolveAllowedRules(kind);
-  if (file.size > rules.maxBytes) {
-    throw new Error(rules.sizeError);
-  }
+  if (file.size > rules.maxBytes) throw new Error(rules.sizeError);
 
   const extension = getExtensionFromName(file.name);
   const extensionAllowed = Boolean(extension) && rules.allowedExtensions.has(extension);
   const mimeAllowed = Boolean(file.type) && rules.allowedMimeTypes.has(file.type);
-
-  if (!extensionAllowed && !mimeAllowed) {
-    throw new Error(rules.typeError);
-  }
+  if (!extensionAllowed && !mimeAllowed) throw new Error(rules.typeError);
 };
 
-const getManagedCampaignAssetPath = (url: string): string | null => {
-  const supabaseOrigin = getSupabaseOrigin();
-  if (!supabaseOrigin) return null;
-
-  try {
-    const parsedUrl = new URL(url);
-    if (parsedUrl.origin !== supabaseOrigin) return null;
-
-    const match = parsedUrl.pathname.match(/^\/storage\/v1\/object\/public\/campaign-assets\/(.+)$/);
-    if (!match || !match[1]) return null;
-
-    const decoded = decodeURIComponent(match[1]);
-    if (!decoded || decoded.includes('..')) return null;
-
-    return decoded;
-  } catch {
-    return null;
-  }
-};
+interface PresignResponse {
+  uploadUrl: string;
+  path: string;
+  headers: Record<string, string>;
+  expiresAt: string;
+}
 
 export async function uploadCampaignAsset({
   file,
-  ownerId,
+  ownerId: _ownerId,
   kind,
 }: UploadCampaignAssetInput): Promise<UploadedCampaignAsset> {
   validateUploadFile(kind, file);
-  const extension = resolveFileExtension(kind, file);
-  const path = `${ownerId}/${kind}/${crypto.randomUUID()}.${extension}`;
 
-  const { error: uploadError } = await supabase.storage.from(BUCKET_NAME).upload(path, file, {
-    upsert: false,
-    contentType: file.type || undefined,
+  // Server-side validation overlap is intentional — server is the source of
+  // truth, client-side just gives faster feedback.
+  let presign: PresignResponse;
+  try {
+    presign = await api.post<PresignResponse>('/storage/campaign-assets/presign', {
+      kind,
+      contentType: file.type,
+      sizeBytes: file.size,
+    });
+  } catch (err) {
+    if (err instanceof ApiError) throw new Error(err.message);
+    throw new Error('Unable to prepare upload right now. Please try again.');
+  }
+
+  const putRes = await fetch(presign.uploadUrl, {
+    method: 'PUT',
+    headers: presign.headers,
+    body: file,
   });
-
-  if (uploadError) {
-    throw new Error('Unable to upload image right now. Please try again.');
+  if (!putRes.ok) {
+    throw new Error('Image upload failed. Please try again.');
   }
 
-  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(path);
-  if (!data.publicUrl) {
-    throw new Error('Image uploaded, but public URL could not be resolved.');
-  }
-
-  return { publicUrl: data.publicUrl, path };
+  // Store the path in the DB. The API converts it back to a signed-GET URL
+  // on read; the SPA only ever renders signed URLs.
+  return { publicUrl: presign.path, path: presign.path };
 }
 
 export async function deleteCampaignAssetByUrl(url: string): Promise<DeleteCampaignAssetResult> {
-  const managedPath = getManagedCampaignAssetPath(url);
-  if (!managedPath) {
-    return { managed: false, deleted: false };
-  }
+  if (!url) return { managed: false, deleted: false };
 
-  const { error } = await supabase.storage.from(BUCKET_NAME).remove([managedPath]);
-  if (error) {
+  // After the migration we store the path, not a full URL. Tolerate either:
+  // if it looks like a signed URL we just refuse (no path extraction); if it
+  // looks like a path, send it as-is.
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    // Currently-rendered signed URLs are not the canonical reference — they
+    // expire. Anything that needs to delete should have the path already.
     return {
-      managed: true,
+      managed: false,
       deleted: false,
-      error: 'Unable to remove previous image from storage. You can continue editing.',
+      error: 'Cannot delete a signed URL — pass the storage path instead.',
     };
   }
 
-  return { managed: true, deleted: true };
+  try {
+    const data = await api.delete<{ deleted: boolean }>('/storage/campaign-assets', { path: url });
+    return { managed: true, deleted: Boolean(data?.deleted) };
+  } catch (err) {
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to remove previous image from storage.';
+    return { managed: true, deleted: false, error: message };
+  }
 }

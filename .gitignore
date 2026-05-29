@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 .env
+.env.api
+.env.postgres
+# Infra runtime env files — never commit
+infra/.env
+infra/.env.prod
+infra/.env.api
+infra/.env.postgres
 
 # Editor directories and files
 .vscode/*

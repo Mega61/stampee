@@ -1,0 +1,75 @@
+# Production stack. Bring up:
+#   docker compose --env-file .env up -d
+# (You must populate .env, .env.api, and .env.postgres from the *.example files first.)
+#
+# Strapi is not modelled here — add it as a sibling service when you integrate it.
+# It will share the same `app` network and the same Postgres instance, using its
+# own database role with grants limited to the `public` schema.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: stampee-postgres
+    restart: unless-stopped
+    env_file: [.env.postgres]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot. `up -d` brings it up, it applies migrations, exits 0, and is
+  # gone. The api service waits for `service_completed_successfully` before
+  # it starts accepting traffic.
+  migrate:
+    image: ${API_IMAGE:?set API_IMAGE in .env}
+    container_name: stampee-migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: [.env.api]
+    networks: [app]
+    command: ["node", "dist/scripts/migrate.js"]
+
+  api:
+    image: ${API_IMAGE:?set API_IMAGE in .env}
+    container_name: stampee-api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: [.env.api]
+    networks: [app]
+    # Not published to the host — Caddy reaches it on the internal network.
+    expose: ["3001"]
+
+  caddy:
+    image: caddy:2
+    container_name: stampee-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      # Pre-built SPA dist is bind-mounted from the host; Caddy serves it as a
+      # static file_server. See infra/README.md for the deploy flow.
+      - ${SPA_DIST_DIR:-/srv/spa}:/srv/spa:ro
+    networks: [app]
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  app:
+    driver: bridge

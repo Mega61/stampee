@@ -1,0 +1,47 @@
+# Stampee API for the SHARED VM.
+#
+# Unlike docker-compose.yml (which ships its own Postgres + Caddy for local
+# dev / reference), this file contributes ONLY the Stampee API and its one-shot
+# migrator. Postgres and Caddy already run on the VM on external Docker
+# networks; we attach to them:
+#   - `web`  : the network your Caddy reverse proxy is on (so it can route to us)
+#   - `data` : the network your shared Postgres is on (so we can reach it)
+#
+# Bring up (from infra/):
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+#
+# The API is reached by Caddy via the container name `stampee-api` on the web
+# network — add a matching `reverse_proxy stampee-api:3001` site to your
+# central Caddyfile. See docs/QUICKSTART.md.
+
+services:
+  # One-shot. Applies db/migrations/*.sql into the `loyalty` schema of the
+  # shared Postgres, then exits. The api service waits for it to complete.
+  migrate:
+    image: ${API_IMAGE:?set API_IMAGE in .env.prod}
+    container_name: stampee-migrate
+    restart: "no"
+    env_file: [.env.api]
+    networks: [data]
+    command: ["node", "dist/scripts/migrate.js"]
+
+  api:
+    image: ${API_IMAGE:?set API_IMAGE in .env.prod}
+    container_name: stampee-api          # Caddy's reverse_proxy targets this name
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: [.env.api]
+    networks: [web, data]                # web = reachable by Caddy; data = reaches Postgres
+    expose: ["3001"]                     # not published to the host; Caddy fronts it
+
+# Both networks are created and owned by your existing stack. Set their real
+# names in .env.prod (WEB_NETWORK / DATA_NETWORK). `docker network ls` lists them.
+networks:
+  web:
+    external: true
+    name: ${WEB_NETWORK:?set WEB_NETWORK in .env.prod}
+  data:
+    external: true
+    name: ${DATA_NETWORK:?set DATA_NETWORK in .env.prod}

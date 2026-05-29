@@ -7,17 +7,15 @@ import { Input } from "./ui/input";
 import { useAuth } from "./AuthProvider";
 import type { AuthResult } from "./AuthProvider";
 import { trackEvent } from "../lib/analytics";
-import { DEMO_WORKSPACE_ENABLED } from "../lib/siteConfig";
 
 const inputCls =
   "h-14 rounded-[1.2rem] border border-black/[0.08] bg-[#f4f1ea] px-4 text-[15px] text-[#171512] shadow-none placeholder:text-[#8a8276] focus-visible:border-black/25 focus-visible:bg-white focus-visible:ring-0";
 const labelCls = "block text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[#777062]";
 
 export const LoginPage: React.FC = () => {
-  const { currentUser, loading, login, loginDemo } = useAuth();
+  const { currentUser, loading, login } = useAuth();
   const location = useLocation();
   const fromPath = (location.state as { from?: { pathname?: string } })?.from?.pathname;
-  const showDemoWorkspace = DEMO_WORKSPACE_ENABLED && new URLSearchParams(location.search).get("admin") === "pogi";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -62,18 +60,6 @@ export const LoginPage: React.FC = () => {
       setBusy(false);
     }
     // Redirect is handled automatically when currentUser becomes set
-  };
-
-  const handleDemo = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      await withTimeout(loginDemo());
-    } catch {
-      setError("Unable to sign in to demo right now. Please try again.");
-    } finally {
-      setBusy(false);
-    }
   };
 
   const isSubmitting = busy;
@@ -140,27 +126,6 @@ export const LoginPage: React.FC = () => {
         </Button>
         {loading && !busy && (
           <p className="text-center text-xs text-[#777062]">Checking existing session...</p>
-        )}
-
-        {showDemoWorkspace && (
-          <>
-            <div className="relative py-1">
-              <div className="border-t border-black/[0.08]" />
-              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#777062]">
-                or
-              </span>
-            </div>
-
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isDisabled}
-              className="h-14 w-full rounded-[1.2rem] border-black/[0.08] bg-white text-base font-semibold text-[#171512] shadow-none hover:bg-[#f8f5ef]"
-              onClick={handleDemo}
-            >
-              Try Demo Workspace
-            </Button>
-          </>
         )}
       </form>
     </AuthSplitLayout>

@@ -1,0 +1,25 @@
+# Local dev: just Postgres on a non-clashing port (5433).
+# Bring up:    docker compose -f infra/docker-compose.dev.yml up -d
+# Tear down:   docker compose -f infra/docker-compose.dev.yml down
+# Wipe data:   docker compose -f infra/docker-compose.dev.yml down -v
+services:
+  postgres:
+    image: postgres:16
+    container_name: stampee-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: loyalty_user
+      POSTGRES_PASSWORD: loyalty_pw
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty_user -d appdb"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pgdata:
