@@ -69,7 +69,10 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, data: await toCampaignDtoSigned(row as CampaignRow, signedReadUrl) };
   });
 
-  // PUT /campaigns/:id — full replace
+  // PUT /campaigns/:id — full replace, upsert semantics. The SPA mints the
+  // campaign id client-side (`custom-<ts>`) and PUTs it for both create and
+  // update, so a PUT to an id this owner doesn't have yet is a create — not a
+  // 404.
   app.put<{ Params: { id: string } }>('/campaigns/:id', async (req) => {
     const claims = await requireRole(req, 'owner');
     const body = parseBody(CampaignBody, req.body);
@@ -80,17 +83,23 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       .where('id', '=', id)
       .where('owner_id', '=', claims.ownerScopeId)
       .executeTakeFirst();
-    if (!existing) throw new AppError(404, 'NOT_FOUND', 'Campaign not found.');
-    const { id: _omit, owner_id: _omit2, ...updateValues } = campaignValuesFromBody(
-      body,
-      claims.ownerScopeId,
-      id,
-    );
-    await db.updateTable('campaigns').set(updateValues).where('id', '=', id).execute();
+    const values = campaignValuesFromBody(body, claims.ownerScopeId, id);
+    if (existing) {
+      const { id: _omit, owner_id: _omit2, ...updateValues } = values;
+      await db
+        .updateTable('campaigns')
+        .set(updateValues)
+        .where('id', '=', id)
+        .where('owner_id', '=', claims.ownerScopeId)
+        .execute();
+    } else {
+      await db.insertInto('campaigns').values(values).execute();
+    }
     const row = await db
       .selectFrom('campaigns')
       .selectAll()
       .where('id', '=', id)
+      .where('owner_id', '=', claims.ownerScopeId)
       .executeTakeFirstOrThrow();
     return { ok: true, data: await toCampaignDtoSigned(row as CampaignRow, signedReadUrl) };
   });

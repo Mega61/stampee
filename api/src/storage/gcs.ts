@@ -30,6 +30,11 @@ export interface PresignUploadResult {
   path: string;
   headers: Record<string, string>;
   expiresAt: string;
+  // Signed GET URL for the object that's about to be uploaded, so the SPA can
+  // display the asset immediately after the PUT completes (the private bucket
+  // can't be read without a signature). Round-trips back to `path` on save via
+  // toStoredAssetRef.
+  readUrl: string;
 }
 
 // Test injection hooks. Production paths call the real GCS client; tests
@@ -60,6 +65,7 @@ export const presignUpload = async (params: {
     contentType: params.contentType,
     extensionHeaders: { 'cache-control': cacheControl },
   });
+  const readUrl = await presignRead(params.path);
   return {
     uploadUrl,
     path: params.path,
@@ -68,6 +74,7 @@ export const presignUpload = async (params: {
       'Cache-Control': cacheControl,
     },
     expiresAt: new Date(expiresAt).toISOString(),
+    readUrl,
   };
 };
 

@@ -104,6 +104,7 @@ export const buildTestRig = async (db: TestDb): Promise<TestRig> => {
           'Cache-Control': 'public, max-age=31536000, immutable',
         },
         expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        readUrl: `https://fake-bucket.test/${path}?read=1`,
       };
     },
     async presignRead(path: string): Promise<string> {

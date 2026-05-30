@@ -74,6 +74,10 @@ interface PresignResponse {
   path: string;
   headers: Record<string, string>;
   expiresAt: string;
+  // Short-lived signed GET URL so the freshly-uploaded asset can be displayed
+  // immediately (the bucket is private). The API normalizes this back to a
+  // path on save.
+  readUrl: string;
 }
 
 export async function uploadCampaignAsset({
@@ -106,29 +110,43 @@ export async function uploadCampaignAsset({
     throw new Error('Image upload failed. Please try again.');
   }
 
-  // Store the path in the DB. The API converts it back to a signed-GET URL
-  // on read; the SPA only ever renders signed URLs.
-  return { publicUrl: presign.path, path: presign.path };
+  // `publicUrl` is the signed GET URL so the SPA can render the asset right
+  // away; `path` is the canonical storage path. On save the API normalizes the
+  // signed URL back to the path, so the DB only ever holds the path.
+  return { publicUrl: presign.readUrl, path: presign.path };
+}
+
+// Storage path shape: {ownerId}/{logo|background}/{uuid}.{ext}. The SPA holds
+// signed GET URLs for display, so pull the path back out of the URL pathname
+// before asking the API to delete it.
+const ASSET_PATH_RE = /[0-9a-f-]{36}\/(?:logo|background)\/[0-9a-f-]{36}\.(?:jpg|png|webp|svg)/i;
+
+function toStoragePath(urlOrPath: string): string | null {
+  if (/^https?:\/\//i.test(urlOrPath)) {
+    try {
+      const pathname = decodeURIComponent(new URL(urlOrPath).pathname);
+      const match = pathname.match(ASSET_PATH_RE);
+      return match ? match[0] : null;
+    } catch {
+      return null;
+    }
+  }
+  return urlOrPath;
 }
 
 export async function deleteCampaignAssetByUrl(url: string): Promise<DeleteCampaignAssetResult> {
   if (!url) return { managed: false, deleted: false };
 
-  // After the migration we store the path, not a full URL. Tolerate either:
-  // if it looks like a signed URL we just refuse (no path extraction); if it
-  // looks like a path, send it as-is.
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    // Currently-rendered signed URLs are not the canonical reference — they
-    // expire. Anything that needs to delete should have the path already.
-    return {
-      managed: false,
-      deleted: false,
-      error: 'Cannot delete a signed URL — pass the storage path instead.',
-    };
+  // The value may be a signed GET URL (what the SPA renders) or already a path.
+  // Either way, resolve it to the canonical storage path the API expects.
+  const path = toStoragePath(url);
+  if (!path) {
+    // An external/hosted image URL we don't manage — nothing to clean up.
+    return { managed: false, deleted: false };
   }
 
   try {
-    const data = await api.delete<{ deleted: boolean }>('/storage/campaign-assets', { path: url });
+    const data = await api.delete<{ deleted: boolean }>('/storage/campaign-assets', { path });
     return { managed: true, deleted: Boolean(data?.deleted) };
   } catch (err) {
     const message =
