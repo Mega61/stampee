@@ -633,7 +633,7 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
         </div>
       </div>
 
-      <div className="order-2 w-full bg-white p-4 pb-6 sm:p-6 lg:order-1 lg:h-[100dvh] lg:w-1/3 lg:border-r lg:p-10 lg:pb-10 lg:overflow-hidden">
+      <div className="order-2 w-full bg-white p-4 pb-6 sm:p-6 lg:order-1 lg:flex lg:flex-col lg:h-[100dvh] lg:w-1/3 lg:border-r lg:p-10 lg:pb-10 lg:overflow-hidden">
         <div className="mb-2 flex items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" onClick={handleCancel} className="rounded-full">
