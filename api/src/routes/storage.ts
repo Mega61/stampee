@@ -12,7 +12,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
   // Returns uploadUrl + path. The SPA PUTs the file to uploadUrl with the
   // exact headers we returned, then saves `path` into the campaign row.
   app.post('/storage/campaign-assets/presign', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parseBody(PresignBody, req.body);
 
     const check = validateAsset({
@@ -25,7 +25,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const path = buildAssetPath({
-      ownerId: claims.sub,
+      ownerId: claims.ownerScopeId,
       kind: body.kind,
       uuid: randomUUID(),
       ext: check.ext,
@@ -37,13 +37,13 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /storage/campaign-assets { path } — owner only.
   // Refuses paths that don't start with the caller's owner id.
   app.delete('/storage/campaign-assets', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parseBody(DeleteAssetBody, req.body);
 
     if (!isValidPath(body.path)) {
       throw new AppError(400, 'INVALID_PATH', 'Path is not in the expected shape.');
     }
-    if (!body.path.startsWith(`${claims.sub}/`)) {
+    if (!body.path.startsWith(`${claims.ownerScopeId}/`)) {
       throw new AppError(403, 'FORBIDDEN', 'Cannot delete assets that belong to another owner.');
     }
 

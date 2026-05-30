@@ -6,7 +6,7 @@ const accessSecret = new TextEncoder().encode(env.JWT_ACCESS_SECRET);
 export interface AccessClaims {
   sub: string;
   email: string;
-  role: 'owner' | 'staff';
+  role: 'owner' | 'staff' | 'admin';
   ownerScopeId: string;
 }
 
@@ -23,7 +23,7 @@ export const verifyAccessToken = async (token: string): Promise<AccessClaims> =>
   if (
     typeof payload.sub !== 'string' ||
     typeof payload.email !== 'string' ||
-    (payload.role !== 'owner' && payload.role !== 'staff') ||
+    (payload.role !== 'owner' && payload.role !== 'staff' && payload.role !== 'admin') ||
     typeof payload.ownerScopeId !== 'string'
   ) {
     throw new Error('malformed access token');

@@ -29,7 +29,7 @@ type ProfileRow = {
   business_name: string;
   email: string;
   slug: string | null;
-  role: 'owner' | 'staff';
+  role: 'owner' | 'staff' | 'admin';
   owner_id: string | null;
   status: 'unverified' | 'verified';
   access: 'active' | 'disabled';
@@ -67,11 +67,11 @@ const requireOwnedStaff = async (staffId: string, ownerId: string): Promise<Prof
 export const staffRoutes: FastifyPluginAsync = async (app) => {
   // GET /staff — list current owner's staff
   app.get('/staff', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const rows = await db
       .selectFrom('profiles')
       .selectAll()
-      .where('owner_id', '=', claims.sub)
+      .where('owner_id', '=', claims.ownerScopeId)
       .where('role', '=', 'staff')
       .orderBy('created_at', 'asc')
       .execute();
@@ -80,7 +80,7 @@ export const staffRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /staff { name, email, pin } — create a staff account
   app.post('/staff', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parse(CreateStaffBody, req.body);
 
     // Email must be unique across loyalty.users.
@@ -93,11 +93,11 @@ export const staffRoutes: FastifyPluginAsync = async (app) => {
       throw new AppError(409, 'EMAIL_TAKEN', 'An account with this email already exists.');
     }
 
-    // Resolve the owner's profile (for the welcome email's slug).
+    // Resolve the primary owner's profile (for the welcome email's slug).
     const owner = await db
       .selectFrom('profiles')
       .selectAll()
-      .where('id', '=', claims.sub)
+      .where('id', '=', claims.ownerScopeId)
       .executeTakeFirstOrThrow();
 
     const pinHash = await hashPin(body.pin);
@@ -120,7 +120,7 @@ export const staffRoutes: FastifyPluginAsync = async (app) => {
           email: body.email,
           slug: null,
           role: 'staff',
-          owner_id: claims.sub,
+          owner_id: claims.ownerScopeId,
           status: 'verified',
           access: 'active',
         })
@@ -153,9 +153,9 @@ export const staffRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /staff/:id/pin { pin }
   app.patch<{ Params: { id: string } }>('/staff/:id/pin', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parse(UpdateStaffPinBody, req.body);
-    const staff = await requireOwnedStaff(req.params.id, claims.sub);
+    const staff = await requireOwnedStaff(req.params.id, claims.ownerScopeId);
     const pinHash = await hashPin(body.pin);
     await db.transaction().execute(async (tx) => {
       await tx
@@ -176,9 +176,9 @@ export const staffRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /staff/:id/access { access }
   app.patch<{ Params: { id: string } }>('/staff/:id/access', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parse(UpdateStaffAccessBody, req.body);
-    const staff = await requireOwnedStaff(req.params.id, claims.sub);
+    const staff = await requireOwnedStaff(req.params.id, claims.ownerScopeId);
     await db.transaction().execute(async (tx) => {
       await tx
         .updateTable('profiles')
@@ -204,8 +204,8 @@ export const staffRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /staff/:id
   app.delete<{ Params: { id: string } }>('/staff/:id', async (req) => {
-    const claims = await requireRole(req, 'owner');
-    const staff = await requireOwnedStaff(req.params.id, claims.sub);
+    const claims = await requireRole(req, 'owner', 'admin');
+    const staff = await requireOwnedStaff(req.params.id, claims.ownerScopeId);
     await db.deleteFrom('users').where('id', '=', staff.id).execute();
     return { ok: true, data: {} };
   });

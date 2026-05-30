@@ -35,6 +35,9 @@ const Env = z.object({
   GOOGLE_APPLICATION_CREDENTIALS: z.string().default(''),
   GCS_PUBLIC_HOST: z.string().url().default('https://storage.googleapis.com'),
 
+  GOOGLE_CLIENT_ID: z.string().default(''),
+  GOOGLE_WORKSPACE_DOMAIN: z.string().default(''),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 

@@ -6,6 +6,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useAuth } from "./AuthProvider";
 import type { AuthResult } from "./AuthProvider";
+import { GoogleSignInButton } from "./GoogleSignInButton";
 import { trackEvent } from "../lib/analytics";
 
 const inputCls =
@@ -13,7 +14,7 @@ const inputCls =
 const labelCls = "block text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[#777062]";
 
 export const LoginPage: React.FC = () => {
-  const { currentUser, loading, login } = useAuth();
+  const { currentUser, loading, login, loginWithGoogle } = useAuth();
   const location = useLocation();
   const fromPath = (location.state as { from?: { pathname?: string } })?.from?.pathname;
 
@@ -62,6 +63,24 @@ export const LoginPage: React.FC = () => {
     // Redirect is handled automatically when currentUser becomes set
   };
 
+  const handleGoogleCredential = async (credential: string) => {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await withTimeout<AuthResult>(loginWithGoogle(credential));
+      if (!result.ok) {
+        setError(result.error);
+      } else {
+        trackEvent("Login Success", { role: result.user?.role ?? "owner", method: "google" });
+      }
+    } catch {
+      setError("No se pudo iniciar sesión con Google. Inténtalo de nuevo.");
+    } finally {
+      setBusy(false);
+    }
+    // Redirect is handled automatically when currentUser becomes set
+  };
+
   const isSubmitting = busy;
   const isDisabled = busy || loading;
 
@@ -72,6 +91,15 @@ export const LoginPage: React.FC = () => {
       badge="Sign in"
       mode="login"
     >
+      <div className="mb-6 space-y-5">
+        <GoogleSignInButton onCredential={handleGoogleCredential} />
+        <div className="flex items-center gap-3 text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[#777062]">
+          <span className="h-px flex-1 bg-black/[0.08]" />
+          <span>o</span>
+          <span className="h-px flex-1 bg-black/[0.08]" />
+        </div>
+      </div>
+
       <form className="space-y-5" onSubmit={handleSubmit}>
         <p className="text-sm leading-6 text-[#6d6658]">
           Owner access only. Staff members should continue using their dedicated portal link and PIN.

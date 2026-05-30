@@ -13,7 +13,7 @@ const DELETE_CONFIRMATION = "DELETE";
 
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { staffAccounts, createStaff, updateStaffPin, setStaffAccess, deleteStaff, currentOwner, currentUser, deleteAccount, updateProfileInfo, updatePassword } = useAuth();
+  const { staffAccounts, createStaff, updateStaffPin, setStaffAccess, deleteStaff, adminAccounts, createAdmin, setAdminAccess, deleteAdmin, isOwner, currentOwner, currentUser, deleteAccount, updateProfileInfo, updatePassword } = useAuth();
   useSubscriptionContext();
 
   const [profileForm, setProfileForm] = useState({
@@ -50,6 +50,16 @@ export const SettingsPage: React.FC = () => {
   const [deleteStaffTarget, setDeleteStaffTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteStaffError, setDeleteStaffError] = useState("");
   const [deleteStaffBusy, setDeleteStaffBusy] = useState(false);
+
+  // --- Co-owner ("Administradores") section state -------------------------
+  const [adminForm, setAdminForm] = useState({ name: "", email: "" });
+  const [adminError, setAdminError] = useState("");
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminActionBusyId, setAdminActionBusyId] = useState<string | null>(null);
+  const [adminActionError, setAdminActionError] = useState("");
+  const [deleteAdminTarget, setDeleteAdminTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteAdminError, setDeleteAdminError] = useState("");
+  const [deleteAdminBusy, setDeleteAdminBusy] = useState(false);
   const [isDeleteStepOneOpen, setIsDeleteStepOneOpen] = useState(false);
   const [isDeleteStepTwoOpen, setIsDeleteStepTwoOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -163,6 +173,43 @@ export const SettingsPage: React.FC = () => {
       return;
     }
     setDeleteStaffTarget(null);
+  };
+
+  const handleCreateAdmin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAdminError("");
+    setAdminActionError("");
+    setAdminBusy(true);
+    const result = await createAdmin(adminForm);
+    setAdminBusy(false);
+    if (!result.ok) {
+      setAdminError(result.error);
+      return;
+    }
+    setAdminForm({ name: "", email: "" });
+  };
+
+  const handleSetAdminAccess = async (adminId: string, access: "active" | "disabled") => {
+    setAdminActionError("");
+    setAdminActionBusyId(adminId);
+    const result = await setAdminAccess(adminId, access);
+    setAdminActionBusyId(null);
+    if (!result.ok) {
+      setAdminActionError(result.error);
+    }
+  };
+
+  const handleDeleteAdmin = async () => {
+    if (!deleteAdminTarget) return;
+    setDeleteAdminError("");
+    setDeleteAdminBusy(true);
+    const result = await deleteAdmin(deleteAdminTarget.id);
+    setDeleteAdminBusy(false);
+    if (!result.ok) {
+      setDeleteAdminError(result.error);
+      return;
+    }
+    setDeleteAdminTarget(null);
   };
 
   return (
@@ -500,6 +547,168 @@ export const SettingsPage: React.FC = () => {
         </div>
       </section>
 
+      {isOwner && (
+        <section className="rounded-2xl md:rounded-3xl border bg-white p-4 md:p-6 shadow-sm space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-lg md:text-xl font-semibold">Administradores</h2>
+              <p className="text-sm text-muted-foreground">
+                Invita a usuarios de tu empresa para que administren campañas, clientes y personal.
+              </p>
+            </div>
+          </div>
+
+          <form className="space-y-3" onSubmit={handleCreateAdmin}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Nombre</Label>
+                <Input
+                  value={adminForm.name}
+                  onChange={(event) => setAdminForm({ ...adminForm, name: event.target.value })}
+                  placeholder="María Administradora"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Correo</Label>
+                <Input
+                  value={adminForm.email}
+                  onChange={(event) => setAdminForm({ ...adminForm, email: event.target.value })}
+                  placeholder="admin@empresa.com"
+                  type="email"
+                  required
+                />
+              </div>
+            </div>
+            <Button type="submit" className="rounded-full h-10 px-6 w-full sm:w-auto" disabled={adminBusy}>
+              {adminBusy ? "Invitando..." : "Invitar administrador"}
+            </Button>
+          </form>
+
+          {adminError && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {adminError}
+            </div>
+          )}
+
+          {adminActionError && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {adminActionError}
+            </div>
+          )}
+
+          {/* Admin table — desktop */}
+          <div className="hidden md:block rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="grid grid-cols-[1.4fr_1.6fr_0.8fr_auto] gap-4 px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground bg-slate-50">
+              <span>Nombre</span>
+              <span>Correo</span>
+              <span>Estado</span>
+              <span className="text-right">Acciones</span>
+            </div>
+            {adminAccounts.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-muted-foreground">
+                Aún no hay administradores. Invita al primero arriba.
+              </div>
+            ) : (
+              adminAccounts.map((admin) => (
+                <div
+                  key={admin.id}
+                  className="grid grid-cols-[1.4fr_1.6fr_0.8fr_auto] gap-4 px-4 py-4 border-t items-center"
+                >
+                  <div className="font-medium text-foreground truncate">{admin.businessName}</div>
+                  <div className="text-sm text-muted-foreground truncate">{admin.email}</div>
+                  <div>
+                    <Badge
+                      variant={admin.access === "active" ? "secondary" : "destructive"}
+                      className="uppercase tracking-wider"
+                    >
+                      {admin.access}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant={admin.access === "active" ? "destructive" : "default"}
+                      size="sm"
+                      disabled={adminActionBusyId === admin.id}
+                      onClick={() =>
+                        handleSetAdminAccess(admin.id, admin.access === "active" ? "disabled" : "active")
+                      }
+                    >
+                      {adminActionBusyId === admin.id ? "Guardando..." : (admin.access === "active" ? "Deshabilitar" : "Habilitar")}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={adminActionBusyId === admin.id}
+                      onClick={() => {
+                        setDeleteAdminTarget({ id: admin.id, name: admin.businessName });
+                        setDeleteAdminError("");
+                      }}
+                    >
+                      Eliminar
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Admin list — mobile cards */}
+          <div className="md:hidden space-y-3">
+            {adminAccounts.length === 0 ? (
+              <div className="rounded-2xl border border-slate-100 px-4 py-6 text-sm text-muted-foreground">
+                Aún no hay administradores. Invita al primero arriba.
+              </div>
+            ) : (
+              adminAccounts.map((admin) => (
+                <div
+                  key={admin.id}
+                  className="rounded-2xl border border-slate-100 bg-slate-50/50 px-4 py-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground truncate">{admin.businessName}</div>
+                      <div className="text-sm text-muted-foreground truncate">{admin.email}</div>
+                    </div>
+                    <Badge
+                      variant={admin.access === "active" ? "secondary" : "destructive"}
+                      className="uppercase tracking-wider shrink-0"
+                    >
+                      {admin.access}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={admin.access === "active" ? "destructive" : "default"}
+                      size="sm"
+                      className="flex-1"
+                      disabled={adminActionBusyId === admin.id}
+                      onClick={() =>
+                        handleSetAdminAccess(admin.id, admin.access === "active" ? "disabled" : "active")
+                      }
+                    >
+                      {adminActionBusyId === admin.id ? "Guardando..." : (admin.access === "active" ? "Deshabilitar" : "Habilitar")}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="flex-1"
+                      disabled={adminActionBusyId === admin.id}
+                      onClick={() => {
+                        setDeleteAdminTarget({ id: admin.id, name: admin.businessName });
+                        setDeleteAdminError("");
+                      }}
+                    >
+                      Eliminar
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="rounded-2xl md:rounded-3xl border border-rose-200 bg-rose-50 p-4 md:p-6 shadow-sm space-y-4">
         <div className="space-y-1">
           <h2 className="text-lg md:text-xl font-semibold text-rose-900">Danger Zone</h2>
@@ -572,6 +781,30 @@ export const SettingsPage: React.FC = () => {
             </Button>
             <Button variant="destructive" onClick={handleDeleteStaff} disabled={deleteStaffBusy}>
               {deleteStaffBusy ? "Deleting..." : "Delete Staff"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteAdminTarget} onOpenChange={(open) => !open && setDeleteAdminTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Eliminar administrador?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Esto eliminará permanentemente a <span className="font-semibold text-foreground">{deleteAdminTarget?.name}</span> y revocará su acceso.
+            </p>
+            {deleteAdminError && (
+              <div className="text-sm text-rose-600">{deleteAdminError}</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteAdminTarget(null)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteAdmin} disabled={deleteAdminBusy}>
+              {deleteAdminBusy ? "Eliminando..." : "Eliminar administrador"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 export const customerRoutes: FastifyPluginAsync = async (app) => {
   // GET /customers?include=cards,transactions
   app.get('/customers', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const query = parseBody(ListCustomersQuery, req.query);
     const include = new Set((query.include ?? '').split(',').map((s) => s.trim()).filter(Boolean));
 
@@ -77,7 +77,7 @@ export const customerRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /customers — owner+staff
   app.post('/customers', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const body = parseBody(CustomerBody, req.body);
     const id = body.id ?? randomUUID();
     await db
@@ -101,7 +101,7 @@ export const customerRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /customers/:id
   app.patch<{ Params: { id: string } }>('/customers/:id', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const body = parseBody(UpdateCustomerBody, req.body);
 
     const existing = await db

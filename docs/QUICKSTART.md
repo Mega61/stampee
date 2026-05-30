@@ -320,6 +320,47 @@ background ≤ 6 MB jpg/png/webp.)
 
 ---
 
+## 8. (Optional) Google Workspace SSO
+
+Add a **"Sign in with Google"** button to the owner `/login` (and staff portal)
+that only accepts accounts on your Workspace domain
+(`goldenbeautystudio.com.co`). It uses the Google Identity Services **ID-token**
+flow — authentication only, no Google API access — so there's **no client secret
+and no redirect URI** to manage.
+
+1. **Create the OAuth client (Google Cloud Console).** Go to **APIs & Services →
+   Credentials → Create credentials → OAuth client ID** and pick **Web
+   application**. Under **Authorized JavaScript origins** add:
+   - `https://loyalty.goldenbeautystudio.com.co`
+   - `http://localhost:3000` (for local dev)
+
+   Leave **Authorized redirect URIs** empty and ignore the client secret — the
+   GIS ID-token flow needs neither. Create it and copy the **Client ID** (looks
+   like `…apps.googleusercontent.com`). It's a public value, safe to commit/bake.
+
+2. **Set the Client ID in two places** — the SPA build and the API runtime:
+   - **(a) SPA build** — as `VITE_GOOGLE_CLIENT_ID`, so Vite bakes it into the
+     bundle. Store it as the repo secret `VITE_GOOGLE_CLIENT_ID` (used by
+     `.github/workflows/build-spa.yml`), or hardcode it there / pass it as a
+     `--build-arg`. Because it's baked at build time, **changing the client ID
+     requires rebuilding the SPA image** (re-push `main` so CI rebuilds).
+   - **(b) API runtime** — add the `GOOGLE_CLIENT_ID` stack environment variable
+     in Portainer (used to verify incoming ID tokens). Also set
+     `GOOGLE_WORKSPACE_DOMAIN=goldenbeautystudio.com.co` (it defaults to that in
+     the compose file). Redeploy the stack to pick them up.
+
+3. **Who can sign in.** Only Google **Workspace** accounts on the allowed domain
+   are accepted: the API verifies the token server-side and requires a verified
+   email plus a matching `hd` (hosted-domain) claim — **consumer Gmail accounts
+   are rejected**. The **first** Workspace user to sign in becomes the owner
+   (auto-provisioned, in place of the step 5 `curl` bootstrap); after an owner
+   exists, unknown accounts are rejected.
+
+If `VITE_GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_ID` are left empty, the Google button
+simply doesn't appear and email/password login is unaffected.
+
+---
+
 ## Ops & next steps
 
 - **Logs**: in Portainer open the `stampee-api` / `stampee-spa` container logs

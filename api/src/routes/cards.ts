@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 export const cardRoutes: FastifyPluginAsync = async (app) => {
   // GET /cards/count
   app.get('/cards/count', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const row = await db
       .selectFrom('issued_cards')
       .select(({ fn }) => fn.count<number>('id').as('count'))
@@ -26,7 +26,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /cards — issue
   app.post('/cards', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const body = parseBody(IssueCardBody, req.body);
 
     // Customer + campaign must belong to current owner scope.
@@ -84,7 +84,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /cards/:id
   app.patch<{ Params: { id: string } }>('/cards/:id', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const body = parseBody(UpdateCardBody, req.body);
 
     const existing = await db
@@ -119,7 +119,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /cards/:id — owner only
   app.delete<{ Params: { id: string } }>('/cards/:id', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const result = await db
       .deleteFrom('issued_cards')
       .where('id', '=', req.params.id)
@@ -134,7 +134,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
   // POST /cards/:id/transactions — append an activity row. Server overrides
   // actor_* from the JWT (no client spoofing).
   app.post<{ Params: { id: string } }>('/cards/:id/transactions', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const body = parseBody(TransactionBody, req.body);
 
     const card = await db
@@ -179,7 +179,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /scan/inspect/:uniqueId — replaces inspect_scanned_card RPC.
   app.get<{ Params: { uniqueId: string } }>('/scan/inspect/:uniqueId', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const row = await db
       .selectFrom('issued_cards')
       .select('owner_id')

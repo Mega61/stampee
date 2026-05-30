@@ -5,7 +5,7 @@ import type { AccessClaims } from '../lib/jwt.js';
 
 export const requireRole = async (
   req: FastifyRequest,
-  ...roles: Array<'owner' | 'staff'>
+  ...roles: Array<'owner' | 'staff' | 'admin'>
 ): Promise<AccessClaims> => {
   const claims = await requireUser(req);
   if (!roles.includes(claims.role)) {

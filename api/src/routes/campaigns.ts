@@ -30,7 +30,7 @@ const campaignValuesFromBody = (body: CampaignBody, ownerId: string, id: string)
 export const campaignRoutes: FastifyPluginAsync = async (app) => {
   // GET /campaigns — owner's campaigns OR staff's owner's campaigns
   app.get('/campaigns', async (req) => {
-    const claims = await requireRole(req, 'owner', 'staff');
+    const claims = await requireRole(req, 'owner', 'staff', 'admin');
     const rows = await db
       .selectFrom('campaigns')
       .selectAll()
@@ -45,7 +45,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /campaigns/count
   app.get('/campaigns/count', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const row = await db
       .selectFrom('campaigns')
       .select(({ fn }) => fn.count<number>('id').as('count'))
@@ -56,7 +56,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /campaigns
   app.post('/campaigns', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parseBody(CampaignBody, req.body);
     const id = body.id ?? randomUUID();
     const values = campaignValuesFromBody(body, claims.ownerScopeId, id);
@@ -74,7 +74,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
   // update, so a PUT to an id this owner doesn't have yet is a create — not a
   // 404.
   app.put<{ Params: { id: string } }>('/campaigns/:id', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parseBody(CampaignBody, req.body);
     const id = req.params.id;
     const existing = await db
@@ -106,7 +106,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /campaigns/:id/enabled
   app.patch<{ Params: { id: string } }>('/campaigns/:id/enabled', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     const body = parseBody(UpdateEnabledBody, req.body);
     const result = await db
       .updateTable('campaigns')
@@ -123,7 +123,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /campaigns/:id — calls the kept DB function so the snapshot +
   // cascade nullify is one atomic transaction.
   app.delete<{ Params: { id: string } }>('/campaigns/:id', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireRole(req, 'owner', 'admin');
     try {
       await sql`
         select loyalty.delete_campaign_preserve_cards(

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { TestDb } from './db.js';
 import type { EmailMessage } from '../../src/email/types.js';
 import type { PresignUploadResult } from '../../src/storage/gcs.js';
+import type { GoogleIdentity } from '../../src/lib/googleVerifier.js';
 
 export interface EmailCollector {
   messages: EmailMessage[];
@@ -26,6 +27,10 @@ export interface TestRig {
   close(): Promise<void>;
   emails: EmailCollector;
   storage: StorageRecorder;
+  /** Install/clear the Google ID-token verifier fake. Pass null to reset. */
+  setGoogleVerifierOverride: (
+    fn: ((credential: string) => Promise<GoogleIdentity>) | null,
+  ) => void;
 }
 
 // ---------------- ENV plumbing ----------------
@@ -54,6 +59,9 @@ const setTestEnv = (databaseUrl: string) => {
   process.env.LOG_LEVEL = 'error';
   process.env.COOKIE_DOMAIN = '';
   process.env.COOKIE_SECURE = 'false';
+  process.env.GOOGLE_CLIENT_ID = 'test-client-id';
+  // example.com so it matches the existing test emails (owner@example.com).
+  process.env.GOOGLE_WORKSPACE_DOMAIN = 'example.com';
 };
 
 // ---------------- Rig ----------------
@@ -65,6 +73,7 @@ export const buildTestRig = async (db: TestDb): Promise<TestRig> => {
   const { buildApp } = await import('../../src/server.js');
   const { setEmailAdapter } = await import('../../src/email/index.js');
   const { setStorageOverrides } = await import('../../src/storage/gcs.js');
+  const { setGoogleVerifierOverride } = await import('../../src/lib/googleVerifier.js');
   const { pool: apiPool } = await import('../../src/db/pool.js');
 
   // ----- email collector -----
@@ -132,7 +141,10 @@ export const buildTestRig = async (db: TestDb): Promise<TestRig> => {
     pool: db.pool,
     emails,
     storage,
+    setGoogleVerifierOverride,
     async close() {
+      // Reset the Google verifier seam so it can't leak into other suites.
+      setGoogleVerifierOverride(null);
       // Order matters: stop Fastify first (drains in-flight requests), then
       // close the app's pg pool so the testcontainer doesn't get killed with
       // open connections still attached (which otherwise raises a
@@ -204,6 +216,29 @@ export const insertOwner = async (
     [userId, params.businessName, params.email.toLowerCase(), params.slug],
   );
   return { userId, profileId: userId, slug: params.slug };
+};
+
+// Insert a co-owner admin directly: a passwordless user (Google-only) plus a
+// business-scoped profile sharing the owner's data (slug=null, owner_id set).
+// Mirrors `insertOwner`. Admins authenticate via /auth/google.
+export const insertAdmin = async (
+  pool: TestDb['pool'],
+  params: { ownerId: string; email: string; name: string },
+): Promise<{ userId: string }> => {
+  const { rows: userRows } = await pool.query<{ id: string }>(
+    `insert into loyalty.users (email, password_hash, google_sub, email_verified_at)
+     values ($1, null, null, now())
+     returning id`,
+    [params.email.toLowerCase()],
+  );
+  const userId = userRows[0]!.id;
+  await pool.query(
+    `insert into loyalty.profiles
+       (id, business_name, email, slug, role, owner_id, status, access)
+     values ($1, $2, $3, null, 'admin', $4, 'verified', 'active')`,
+    [userId, params.name, params.email.toLowerCase(), params.ownerId],
+  );
+  return { userId };
 };
 
 export const insertCampaign = async (

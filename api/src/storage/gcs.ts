@@ -95,8 +95,27 @@ export const signedReadUrl = async (
   path: string | null | undefined,
 ): Promise<string | undefined> => {
   if (!path) return undefined;
-  // Tolerate accidentally-stored full URLs (shouldn't happen with new code).
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  // A stored value is one of:
+  //   - a bare storage path        -> sign it
+  //   - one of OUR bucket URLs     -> extract the path and sign a FRESH URL.
+  //     It may be an already-expired signed URL the SPA captured (e.g. frozen
+  //     into a card's template_snapshot at issue time); serving it verbatim
+  //     would 403 for everyone once the 1h signature lapses, so we re-sign.
+  //   - a fully external image URL -> return untouched (owner pasted it in).
+  // The bucket is private and signatures expire, so anything resolving to one
+  // of our objects MUST be re-signed on every read.
+  if (/^https?:\/\//i.test(path)) {
+    let assetPath: string | null = null;
+    try {
+      const pathname = decodeURIComponent(new URL(path).pathname);
+      const match = pathname.match(ASSET_PATH_RE);
+      if (match) assetPath = match[0];
+    } catch {
+      // Not parseable as a URL — fall through and treat as external.
+    }
+    if (!assetPath) return path;
+    return presignRead(assetPath);
+  }
   return presignRead(path);
 };
 

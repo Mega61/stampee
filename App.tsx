@@ -622,14 +622,14 @@ const AppRoutes: React.FC = () => {
 
         {/* Authenticated Routes */}
         <Route element={<RequireAuth />}>
-          <Route element={<RequireRole allowed={["owner"]} />}>
+          <Route element={<RequireRole allowed={["owner", "admin"]} />}>
             <Route path="/active/:cardId" element={<ActiveCardWrapper templates={createdCards} />} />
             <Route path="/preview/:templateId" element={<PreviewWrapper />} />
             <Route path="/editor/:id" element={<EditorWrapper onSave={handleSaveCard} templates={createdCards} />} />
           </Route>
 
           <Route element={<DashboardLayout />}>
-            <Route element={<RequireRole allowed={["owner"]} />}>
+            <Route element={<RequireRole allowed={["owner", "admin"]} />}>
             <Route path="/dashboard" element={
                 withSuspense(<DashboardPage campaigns={createdCards} customers={customers} />)
               } />
@@ -648,7 +648,7 @@ const AppRoutes: React.FC = () => {
               <Route path="/settings" element={withSuspense(<SettingsPage />)} />
             </Route>
 
-            <Route element={<RequireRole allowed={["owner", "staff"]} />}>
+            <Route element={<RequireRole allowed={["owner", "admin", "staff"]} />}>
               <Route path="/issued-cards" element={
                 withSuspense(
                   <IssuedCardsPage

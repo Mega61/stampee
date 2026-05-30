@@ -5,6 +5,7 @@ import { AuthSplitLayout } from "./AuthSplitLayout";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useAuth } from "./AuthProvider";
+import { GoogleSignInButton } from "./GoogleSignInButton";
 import { buildIssuedCardsKioskUrl } from "../lib/links";
 
 const inputCls =
@@ -12,7 +13,7 @@ const inputCls =
 const labelCls = "block text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[#777062]";
 
 export const StaffLoginPage: React.FC = () => {
-  const { currentUser, loginStaff } = useAuth();
+  const { currentUser, loginStaff, loginStaffWithGoogle } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const kioskId = searchParams.get("kiosk") ?? "";
@@ -67,6 +68,23 @@ export const StaffLoginPage: React.FC = () => {
     }
   };
 
+  const handleGoogleCredential = async (credential: string) => {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await withTimeout(loginStaffWithGoogle(credential, orgId));
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      navigate(kioskId ? buildIssuedCardsKioskUrl(kioskId) : "/issued-cards");
+    } catch {
+      setError("No se pudo iniciar sesión en este momento. Inténtalo de nuevo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const hasPrefilledOrgId = Boolean(searchParams.get("id"));
 
   return (
@@ -76,6 +94,17 @@ export const StaffLoginPage: React.FC = () => {
       badge="Acceso del equipo"
       mode="staff"
     >
+      {orgId && (
+        <div className="mb-6 space-y-5">
+          <GoogleSignInButton text="continue_with" onCredential={handleGoogleCredential} />
+          <div className="flex items-center gap-3 text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[#777062]">
+            <span className="h-px flex-1 bg-black/[0.08]" />
+            <span>o</span>
+            <span className="h-px flex-1 bg-black/[0.08]" />
+          </div>
+        </div>
+      )}
+
       <form className="space-y-5" onSubmit={handleSubmit}>
         <p className="text-sm leading-6 text-[#6d6658]">
           Las credenciales del personal son independientes del inicio de sesión del propietario y están ligadas al ID del negocio correcto.

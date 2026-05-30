@@ -91,7 +91,7 @@ export interface Customer {
 
 // Internal account state. Email confirmation runs through the self-hosted API.
 export type AccountStatus = 'unverified' | 'verified';
-export type UserRole = 'owner' | 'staff';
+export type UserRole = 'owner' | 'staff' | 'admin';
 export type AccessStatus = 'active' | 'disabled';
 // `tier` is dropped in the self-host fork (no monetization). The type alias
 // stays for legacy consumers; everyone is treated as fully unlocked.

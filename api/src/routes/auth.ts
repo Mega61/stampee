@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import type { Transaction } from 'kysely';
 import { ZodError } from 'zod';
 import { db } from '../db/kysely.js';
+import type { Database } from '../db/types.js';
 import { env } from '../config.js';
 import { AppError } from '../lib/errors.js';
 import { hashPassword, verifyHash } from '../lib/passwords.js';
@@ -12,6 +14,11 @@ import {
 } from '../lib/cookies.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
 import { normalizeSlug, isSlugValid } from '../lib/slug.js';
+import {
+  verifyGoogleIdToken,
+  domainAllowed,
+  type GoogleIdentity,
+} from '../lib/googleVerifier.js';
 import { requireUser } from '../middleware/requireUser.js';
 import { email } from '../email/index.js';
 import { verifyTemplate } from '../email/templates/verify.js';
@@ -20,6 +27,8 @@ import {
   SignupBody,
   LoginBody,
   StaffLoginBody,
+  GoogleAuthBody,
+  GoogleStaffAuthBody,
   ForgotPasswordBody,
   ResetPasswordBody,
   ChangePasswordBody,
@@ -50,7 +59,7 @@ type ProfileRow = {
   business_name: string;
   email: string;
   slug: string | null;
-  role: 'owner' | 'staff';
+  role: 'owner' | 'staff' | 'admin';
   owner_id: string | null;
   status: 'unverified' | 'verified';
   access: 'active' | 'disabled';
@@ -168,6 +177,78 @@ const rotateSession = async (
 
   setAccessCookie(reply, access);
   setRefreshCookie(reply, refresh);
+};
+
+// Derive a unique owner slug from a Google display name (or email local-part),
+// appending a short numeric suffix until it's both valid and unused.
+const deriveUniqueSlug = async (
+  tx: Transaction<Database>,
+  seed: string,
+): Promise<string> => {
+  let base = normalizeSlug(seed);
+  if (!isSlugValid(base)) {
+    // Pad/normalize to satisfy the 3-30 char + charset rule.
+    base = normalizeSlug(`${seed}-team`);
+    if (!isSlugValid(base)) base = `org-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  let candidate = base;
+  let attempt = 0;
+  // Bound the loop generously; collisions are extremely unlikely.
+  while (attempt < 1000) {
+    const existing = await tx
+      .selectFrom('profiles')
+      .select('id')
+      .where('slug', '=', candidate)
+      .executeTakeFirst();
+    if (!existing) return candidate;
+    attempt += 1;
+    const suffix = `-${attempt}`;
+    candidate = `${base.slice(0, 30 - suffix.length)}${suffix}`;
+  }
+  // Final fallback — random suffix is effectively collision-free.
+  return `org-${crypto.randomUUID().slice(0, 12)}`;
+};
+
+// Bootstrap the very first Workspace user as the owner. Inserts a passwordless
+// user (Google-only) and a verified+active owner profile. Returns the profile.
+const provisionOwnerFromGoogle = async (
+  tx: Transaction<Database>,
+  identity: GoogleIdentity,
+): Promise<ProfileRow> => {
+  const localPart = identity.email.split('@')[0] ?? identity.email;
+  const businessName = (identity.name ?? '').trim() || localPart;
+  const slug = await deriveUniqueSlug(tx, identity.name?.trim() || localPart);
+
+  const user = await tx
+    .insertInto('users')
+    .values({
+      email: identity.email,
+      google_sub: identity.sub,
+      email_verified_at: new Date(),
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+
+  await tx
+    .insertInto('profiles')
+    .values({
+      id: user.id,
+      business_name: businessName,
+      email: identity.email,
+      slug,
+      role: 'owner',
+      owner_id: null,
+      status: 'verified',
+      access: 'active',
+    })
+    .execute();
+
+  const profile = await tx
+    .selectFrom('profiles')
+    .selectAll()
+    .where('id', '=', user.id)
+    .executeTakeFirstOrThrow();
+  return profile as ProfileRow;
 };
 
 // ---------- routes ----------
@@ -328,21 +409,21 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
     const profile = await loadProfile(user.id);
     if (!profile) throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password.');
-    if (profile.role !== 'owner') {
+    if (profile.role !== 'owner' && profile.role !== 'admin') {
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Use the staff login URL to sign in as staff.');
     }
     if (profile.access === 'disabled') {
       throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled.');
     }
 
-    await issueNewSession(reply, req, profile);
-    const owner = profile;
-    const staffAccounts = await loadStaffAccounts(profile.id);
+    const claims = await issueNewSession(reply, req, profile);
+    const owner = await loadOwnerScope(claims);
+    const staffAccounts = await loadStaffAccounts(claims.ownerScopeId);
     return {
       ok: true,
       data: {
         user: toUserDto(profile),
-        owner: toUserDto(owner),
+        owner: owner ? toUserDto(owner) : toUserDto(profile),
         staffAccounts: staffAccounts.map(toUserDto),
       },
     };
@@ -376,6 +457,131 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
     if (profile.access === 'disabled') {
       throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled.');
+    }
+
+    await issueNewSession(reply, req, profile);
+    return {
+      ok: true,
+      data: {
+        user: toUserDto(profile),
+        owner: toUserDto(owner as ProfileRow),
+        staffAccounts: [] as ReturnType<typeof toUserDto>[],
+      },
+    };
+  });
+
+  // POST /auth/google (owner Google Workspace SSO)
+  app.post('/auth/google', async (req, reply) => {
+    const body = parse(GoogleAuthBody, req.body);
+    const identity = await verifyGoogleIdToken(body.credential);
+    if (!identity.emailVerified) {
+      throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Your Google email is not verified.');
+    }
+    if (!domainAllowed(identity.hd)) {
+      throw new AppError(403, 'DOMAIN_NOT_ALLOWED', 'This Google account is not allowed to sign in.');
+    }
+
+    const user = await db
+      .selectFrom('users')
+      .select(['id', 'email', 'google_sub', 'email_verified_at'])
+      .where('email', '=', identity.email)
+      .executeTakeFirst();
+
+    let profile: ProfileRow;
+    if (user) {
+      const found = await loadProfile(user.id);
+      if (!found) {
+        throw new AppError(403, 'NO_ACCOUNT', 'No account is associated with this Google account.');
+      }
+      if (found.role !== 'owner' && found.role !== 'admin') {
+        throw new AppError(403, 'NO_ACCOUNT', 'This is a staff account — use the staff portal to sign in.');
+      }
+      if (found.access === 'disabled') {
+        throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled.');
+      }
+      // Link the Google identity on first SSO sign-in.
+      if (user.google_sub === null || user.email_verified_at === null) {
+        await db
+          .updateTable('users')
+          .set({
+            google_sub: user.google_sub === null ? identity.sub : user.google_sub,
+            email_verified_at: user.email_verified_at === null ? new Date() : user.email_verified_at,
+          })
+          .where('id', '=', user.id)
+          .execute();
+      }
+      profile = found;
+    } else {
+      // No matching user. Bootstrap as owner only if NO owner exists yet.
+      const existingOwner = await db
+        .selectFrom('profiles')
+        .select('id')
+        .where('role', '=', 'owner')
+        .executeTakeFirst();
+      if (existingOwner) {
+        throw new AppError(403, 'NO_ACCOUNT', 'No account is associated with this Google account.');
+      }
+      profile = await db.transaction().execute((tx) => provisionOwnerFromGoogle(tx, identity));
+    }
+
+    const claims = await issueNewSession(reply, req, profile);
+    const owner = await loadOwnerScope(claims);
+    const staffAccounts = await loadStaffAccounts(claims.ownerScopeId);
+    return {
+      ok: true,
+      data: {
+        user: toUserDto(profile),
+        owner: owner ? toUserDto(owner) : toUserDto(profile),
+        staffAccounts: staffAccounts.map(toUserDto),
+      },
+    };
+  });
+
+  // POST /auth/google-staff (staff Google Workspace SSO; orgId = owner slug)
+  app.post('/auth/google-staff', async (req, reply) => {
+    const body = parse(GoogleStaffAuthBody, req.body);
+    const identity = await verifyGoogleIdToken(body.credential);
+    if (!identity.emailVerified) {
+      throw new AppError(403, 'EMAIL_NOT_VERIFIED', 'Your Google email is not verified.');
+    }
+    if (!domainAllowed(identity.hd)) {
+      throw new AppError(403, 'DOMAIN_NOT_ALLOWED', 'This Google account is not allowed to sign in.');
+    }
+
+    const ownerSlug = normalizeSlug(body.orgId);
+    const owner = await db
+      .selectFrom('profiles')
+      .selectAll()
+      .where('slug', '=', ownerSlug)
+      .where('role', '=', 'owner')
+      .executeTakeFirst();
+    if (!owner) throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid Google account or business.');
+
+    const user = await db
+      .selectFrom('users')
+      .select(['id', 'email', 'google_sub', 'email_verified_at'])
+      .where('email', '=', identity.email)
+      .executeTakeFirst();
+    if (!user) throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid Google account or business.');
+
+    const profile = await loadProfile(user.id);
+    if (!profile || profile.role !== 'staff' || profile.owner_id !== owner.id) {
+      throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid Google account or business.');
+    }
+    if (profile.access === 'disabled') {
+      throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled.');
+    }
+
+    // Link the Google identity on first SSO sign-in.
+    if (user.google_sub === null || user.email_verified_at === null) {
+      await db
+        .updateTable('users')
+        .set({
+          google_sub: user.google_sub === null ? identity.sub : user.google_sub,
+          email_verified_at: user.email_verified_at === null ? new Date() : user.email_verified_at,
+        })
+        .where('id', '=', user.id)
+        .execute();
     }
 
     await issueNewSession(reply, req, profile);
@@ -444,7 +650,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled.');
     }
     const owner = await loadOwnerScope(claims);
-    const staffAccounts = profile.role === 'owner' ? await loadStaffAccounts(profile.id) : [];
+    const staffAccounts =
+      profile.role === 'owner' || profile.role === 'admin'
+        ? await loadStaffAccounts(claims.ownerScopeId)
+        : [];
     return {
       ok: true,
       data: {
@@ -550,13 +759,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const claims = await requireUser(req);
     if (claims.role === 'owner') {
       await db.transaction().execute(async (tx) => {
-        const staff = await tx
+        const members = await tx
           .selectFrom('profiles')
           .select('id')
           .where('owner_id', '=', claims.sub)
-          .where('role', '=', 'staff')
+          .where('role', 'in', ['staff', 'admin'])
           .execute();
-        const ids = [claims.sub, ...staff.map((s) => s.id)];
+        const ids = [claims.sub, ...members.map((m) => m.id)];
         await tx.deleteFrom('users').where('id', 'in', ids).execute();
       });
     } else {

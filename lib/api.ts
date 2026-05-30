@@ -42,7 +42,7 @@ interface Options {
 // Used by api.ts to remember when a refresh is already mid-flight so two
 // concurrent 401-retries dedupe to a single /auth/refresh call.
 let inFlightRefresh: Promise<boolean> | null = null;
-const REFRESH_ENDPOINTS = new Set(['/auth/refresh', '/auth/me']);
+const REFRESH_ENDPOINTS = new Set(['/auth/refresh', '/auth/me', '/auth/google', '/auth/google-staff']);
 
 const buildUrl = (path: string, query?: Options['query']) => {
   const url = new URL(`${API_BASE}${path.startsWith('/') ? path : `/${path}`}`);

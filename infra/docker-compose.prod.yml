@@ -7,6 +7,8 @@
 #   JWT_REFRESH_SECRET    (>=32 random chars)
 # Optional (leave unset until needed):
 #   RESEND_API_KEY, GCS_BUCKET, GCS_PROJECT_ID
+#   GOOGLE_CLIENT_ID (enables "Sign in with Google"; same value baked into the SPA),
+#     GOOGLE_WORKSPACE_DOMAIN (default goldenbeautystudio.com.co)
 #   STAMPEE_DB_USER (default loyalty_user), STAMPEE_DB_NAME (default stampee),
 #   STAMPEE_DB_HOST (default postgres-transversal)
 #
@@ -51,6 +53,8 @@ x-stampee-api-env: &stampee-api-env
   GCS_PROJECT_ID: ${GCS_PROJECT_ID:-}
   GOOGLE_APPLICATION_CREDENTIALS: ""
   GCS_PUBLIC_HOST: https://storage.googleapis.com
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_WORKSPACE_DOMAIN: ${GOOGLE_WORKSPACE_DOMAIN:-goldenbeautystudio.com.co}
   LOG_LEVEL: info
 
 services:

@@ -30,6 +30,15 @@ export const StaffLoginBody = z.object({
   orgId: z.string().trim().min(1).max(120),
 });
 
+export const GoogleAuthBody = z.object({
+  credential: z.string().min(1),
+});
+
+export const GoogleStaffAuthBody = z.object({
+  credential: z.string().min(1),
+  orgId: z.string().trim().min(1).max(120),
+});
+
 export const ForgotPasswordBody = z.object({
   email: emailSchema,
 });

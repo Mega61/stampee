@@ -2,6 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { User } from "../types";
 import { api, ApiError, broadcastAuth, onAuthBroadcast } from "../lib/api";
 import { normalizeSlug } from "../lib/slug";
+import {
+  fetchAdmins,
+  createAdmin as dbCreateAdmin,
+  setAdminAccess as dbSetAdminAccess,
+  deleteAdmin as dbDeleteAdmin,
+} from "../lib/db/admins";
 
 export type AuthResult = { ok: true; user?: User; message?: string } | { ok: false; error: string };
 
@@ -16,16 +22,24 @@ interface AuthContextValue {
   currentOwner: User | null;
   isOwner: boolean;
   isStaff: boolean;
+  isAdmin: boolean;
   isEmailVerified: boolean;
   loading: boolean;
   staffAccounts: User[];
+  adminAccounts: User[];
   login: (email: string, password: string) => Promise<AuthResult>;
   loginStaff: (email: string, pin: string, orgId: string) => Promise<AuthResult>;
+  loginWithGoogle: (credential: string) => Promise<AuthResult>;
+  loginStaffWithGoogle: (credential: string, orgId: string) => Promise<AuthResult>;
   signup: (payload: { businessName: string; email: string; password: string; slug: string }) => Promise<AuthResult>;
   createStaff: (payload: { name: string; email: string; pin: string }) => Promise<AuthResult>;
   updateStaffPin: (staffId: string, pin: string) => Promise<AuthResult>;
   setStaffAccess: (staffId: string, access: "active" | "disabled") => Promise<AuthResult>;
   deleteStaff: (staffId: string) => Promise<AuthResult>;
+  createAdmin: (payload: { name: string; email: string }) => Promise<AuthResult>;
+  setAdminAccess: (adminId: string, access: "active" | "disabled") => Promise<AuthResult>;
+  deleteAdmin: (adminId: string) => Promise<AuthResult>;
+  refreshAdmins: () => Promise<void>;
   deleteAccount: () => Promise<AuthResult>;
   logout: () => Promise<void>;
   resendVerificationEmail: () => Promise<AuthResult>;
@@ -50,12 +64,36 @@ const PROFILE_UPDATE_ERROR = "Unable to update your profile right now. Please tr
 const PASSWORD_UPDATE_ERROR = "Unable to update your password right now. Please try again.";
 const PASSWORD_RESET_ERROR = "Unable to send a reset link right now. Please try again.";
 const STAFF_ACTION_ERROR = "Unable to complete this staff action right now. Please try again.";
+const ADMIN_ACTION_ERROR = "Unable to complete this admin action right now. Please try again.";
 const ACCOUNT_ACTION_ERROR = "Unable to complete this account action right now. Please try again.";
+
+const GOOGLE_SIGNIN_ERROR_MESSAGE = "No se pudo iniciar sesión con Google. Inténtalo de nuevo.";
+
+// Map ApiError.code values from the /auth/google* endpoints to friendly
+// Spanish messages, matching the recently localized auth UI.
+const googleErrorMessage = (err: unknown): string => {
+  if (err instanceof ApiError) {
+    switch (err.code) {
+      case "DOMAIN_NOT_ALLOWED":
+        return "Debes usar una cuenta de Google de la empresa.";
+      case "NO_ACCOUNT":
+        return "No existe una cuenta para este correo. Contacta al administrador.";
+      case "ACCOUNT_DISABLED":
+        return "Esta cuenta está deshabilitada.";
+      case "EMAIL_NOT_VERIFIED":
+        return "Tu correo de Google no está verificado.";
+      default:
+        return GOOGLE_SIGNIN_ERROR_MESSAGE;
+    }
+  }
+  return GOOGLE_SIGNIN_ERROR_MESSAGE;
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentOwner, setCurrentOwner] = useState<User | null>(null);
   const [staffAccounts, setStaffAccounts] = useState<User[]>([]);
+  const [adminAccounts, setAdminAccounts] = useState<User[]>([]);
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -63,7 +101,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(null);
     setCurrentOwner(null);
     setStaffAccounts([]);
+    setAdminAccounts([]);
     setIsEmailVerified(false);
+  }, []);
+
+  // Owner-only: pull the co-owner ("admin") list. Returns [] for non-owners.
+  const refreshAdmins = useCallback(async (): Promise<void> => {
+    const admins = await fetchAdmins();
+    setAdminAccounts(admins);
   }, []);
 
   // Pull the whole session shape (user + owner + staff list) in one call.
@@ -75,12 +120,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentOwner(data.owner ?? data.user);
       setStaffAccounts(data.staffAccounts ?? []);
       setIsEmailVerified(data.user.status === "verified");
+      // Only the primary owner manages co-owners, so only they need the list.
+      if (data.user.role === "owner") {
+        await refreshAdmins();
+      } else {
+        setAdminAccounts([]);
+      }
       return data.user;
     } catch {
       clearSession();
       return null;
     }
-  }, [clearSession]);
+  }, [clearSession, refreshAdmins]);
 
   // Boot: try to resolve the session once. The api.ts auto-refresh-then-retry
   // means an expired access cookie is silently rotated if the refresh cookie
@@ -159,6 +210,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [loadSession],
   );
 
+  const loginWithGoogle = useCallback(
+    async (credential: string): Promise<AuthResult> => {
+      try {
+        await api.post("/auth/google", { credential });
+      } catch (err) {
+        return { ok: false, error: googleErrorMessage(err) };
+      }
+      const user = await loadSession();
+      broadcastAuth({ type: "login" });
+      if (!user) return { ok: false, error: GOOGLE_SIGNIN_ERROR_MESSAGE };
+      return { ok: true, user };
+    },
+    [loadSession],
+  );
+
+  const loginStaffWithGoogle = useCallback(
+    async (credential: string, orgId: string): Promise<AuthResult> => {
+      try {
+        await api.post("/auth/google-staff", { credential, orgId });
+      } catch (err) {
+        return { ok: false, error: googleErrorMessage(err) };
+      }
+      const user = await loadSession();
+      broadcastAuth({ type: "login" });
+      if (!user) return { ok: false, error: GOOGLE_SIGNIN_ERROR_MESSAGE };
+      return { ok: true, user };
+    },
+    [loadSession],
+  );
+
   const signup = useCallback(
     async (payload: {
       businessName: string;
@@ -196,7 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const createStaff = useCallback(
     async (payload: { name: string; email: string; pin: string }): Promise<AuthResult> => {
-      if (!currentOwner || currentUser?.role !== "owner") {
+      if (!currentOwner || (currentUser?.role !== "owner" && currentUser?.role !== "admin")) {
         return { ok: false, error: "Only owners can manage staff." };
       }
       if (!/^\d{4,6}$/.test(payload.pin)) {
@@ -219,7 +300,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateStaffPin = useCallback(
     async (staffId: string, pin: string): Promise<AuthResult> => {
-      if (!currentOwner || currentUser?.role !== "owner") {
+      if (!currentOwner || (currentUser?.role !== "owner" && currentUser?.role !== "admin")) {
         return { ok: false, error: "Only owners can manage staff." };
       }
       if (!/^\d{4,6}$/.test(pin)) {
@@ -237,7 +318,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const setStaffAccess = useCallback(
     async (staffId: string, access: "active" | "disabled"): Promise<AuthResult> => {
-      if (!currentOwner || currentUser?.role !== "owner") {
+      if (!currentOwner || (currentUser?.role !== "owner" && currentUser?.role !== "admin")) {
         return { ok: false, error: "Only owners can manage staff." };
       }
       try {
@@ -253,7 +334,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteStaff = useCallback(
     async (staffId: string): Promise<AuthResult> => {
-      if (!currentOwner || currentUser?.role !== "owner") {
+      if (!currentOwner || (currentUser?.role !== "owner" && currentUser?.role !== "admin")) {
         return { ok: false, error: "Only owners can manage staff." };
       }
       try {
@@ -265,6 +346,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { ok: true };
     },
     [currentOwner, currentUser, loadSession],
+  );
+
+  // --- Co-owner ("admin") management — OWNER ONLY -------------------------
+  // Mirrors the staff methods above, but admins are invited by email (no PIN)
+  // and only the primary owner may manage them.
+  const createAdmin = useCallback(
+    async (payload: { name: string; email: string }): Promise<AuthResult> => {
+      if (!currentOwner || currentUser?.role !== "owner") {
+        return { ok: false, error: "Only owners can manage admins." };
+      }
+      try {
+        await dbCreateAdmin(payload);
+      } catch (err) {
+        return fail(err, ADMIN_ACTION_ERROR);
+      }
+      await refreshAdmins();
+      return { ok: true };
+    },
+    [currentOwner, currentUser, refreshAdmins],
+  );
+
+  const setAdminAccess = useCallback(
+    async (adminId: string, access: "active" | "disabled"): Promise<AuthResult> => {
+      if (!currentOwner || currentUser?.role !== "owner") {
+        return { ok: false, error: "Only owners can manage admins." };
+      }
+      try {
+        await dbSetAdminAccess(adminId, access);
+      } catch (err) {
+        return fail(err, ADMIN_ACTION_ERROR);
+      }
+      await refreshAdmins();
+      return { ok: true };
+    },
+    [currentOwner, currentUser, refreshAdmins],
+  );
+
+  const deleteAdmin = useCallback(
+    async (adminId: string): Promise<AuthResult> => {
+      if (!currentOwner || currentUser?.role !== "owner") {
+        return { ok: false, error: "Only owners can manage admins." };
+      }
+      try {
+        await dbDeleteAdmin(adminId);
+      } catch (err) {
+        return fail(err, ADMIN_ACTION_ERROR);
+      }
+      await refreshAdmins();
+      return { ok: true };
+    },
+    [currentOwner, currentUser, refreshAdmins],
   );
 
   const deleteAccount = useCallback(async (): Promise<AuthResult> => {
@@ -358,16 +490,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentOwner,
       isOwner: currentUser?.role === "owner",
       isStaff: currentUser?.role === "staff",
+      isAdmin: currentUser?.role === "admin",
       isEmailVerified,
       loading,
       staffAccounts,
+      adminAccounts,
       login,
       loginStaff,
+      loginWithGoogle,
+      loginStaffWithGoogle,
       signup,
       createStaff,
       updateStaffPin,
       setStaffAccess,
       deleteStaff,
+      createAdmin,
+      setAdminAccess,
+      deleteAdmin,
+      refreshAdmins,
       deleteAccount,
       logout,
       resendVerificationEmail,
@@ -378,9 +518,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       refreshProfile,
     }),
     [
-      currentUser, currentOwner, isEmailVerified, loading, staffAccounts,
-      login, loginStaff, signup, createStaff,
-      updateStaffPin, setStaffAccess, deleteStaff, deleteAccount, logout,
+      currentUser, currentOwner, isEmailVerified, loading, staffAccounts, adminAccounts,
+      login, loginStaff, loginWithGoogle, loginStaffWithGoogle, signup, createStaff,
+      updateStaffPin, setStaffAccess, deleteStaff, createAdmin, setAdminAccess, deleteAdmin,
+      refreshAdmins, deleteAccount, logout,
       resendVerificationEmail, isSlugAvailable, updateProfileInfo,
       updatePassword, resetPassword, refreshProfile,
     ],

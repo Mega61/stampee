@@ -11,6 +11,7 @@ import { authPreHandler } from './middleware/auth.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { staffRoutes } from './routes/staff.js';
+import { adminRoutes } from './routes/admins.js';
 import { profileRoutes } from './routes/profile.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { customerRoutes } from './routes/customers.js';
@@ -78,6 +79,7 @@ export const buildApp = async () => {
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(staffRoutes);
+  await app.register(adminRoutes);
   await app.register(profileRoutes);
   await app.register(campaignRoutes);
   await app.register(customerRoutes);

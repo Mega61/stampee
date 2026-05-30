@@ -6,7 +6,8 @@ import type { ColumnType, Generated } from 'kysely';
 export interface UsersTable {
   id: Generated<string>;
   email: string;
-  password_hash: string;
+  password_hash: ColumnType<string | null, string | null | undefined, string | null>;
+  google_sub: ColumnType<string | null, string | null | undefined, string | null>;
   email_verified_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -17,7 +18,7 @@ export interface ProfilesTable {
   business_name: string;
   email: string;
   slug: string | null;
-  role: 'owner' | 'staff';
+  role: 'owner' | 'staff' | 'admin';
   owner_id: string | null;
   status: 'unverified' | 'verified';
   access: 'active' | 'disabled';
