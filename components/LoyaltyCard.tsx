@@ -424,29 +424,20 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                 >
                   {template.name}
                 </h1>
-                {mode === 'public' ? (
-                    <p
-                      className={cn(
-                        "font-medium text-sm md:text-base tracking-wide opacity-90 drop-shadow-sm",
-                        sizeVariant === 'compact' && "text-xs md:text-sm",
-                        isMobileCompleted && "text-xs"
-                      )}
-                      style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}
-                    >
-                      {template.description}
-                    </p>
-                ) : (
-                    <p
-                      className={cn(
-                        "font-medium text-sm md:text-base tracking-wide opacity-90 drop-shadow-sm",
-                        sizeVariant === 'compact' && "text-xs md:text-sm",
-                        isMobileCompleted && "text-xs"
-                      )}
-                      style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}
-                    >
-                    {template.tagline ? template.tagline : `Reúne ${totalStamps} sellos y reclama tu ${rewardName}`}
-                    </p>
-                )}
+                {/* Subtitle: always the owner-editable tagline (with a count
+                    fallback) so the customer-facing card matches what's shown
+                    in the editor preview. `description` is a preset-only field
+                    the editor never exposes, so it must not drive display. */}
+                <p
+                  className={cn(
+                    "font-medium text-sm md:text-base tracking-wide opacity-90 drop-shadow-sm",
+                    sizeVariant === 'compact' && "text-xs md:text-sm",
+                    isMobileCompleted && "text-xs"
+                  )}
+                  style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}
+                >
+                  {template.tagline ? template.tagline : `Reúne ${totalStamps} sellos y reclama tu ${rewardName}`}
+                </p>
               </div>
 
               {/* Stamps Grid */}
