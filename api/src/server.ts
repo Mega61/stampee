@@ -52,9 +52,11 @@ export const buildApp = async () => {
     }
     if (err instanceof ZodError) {
       const first = err.errors[0];
+      const path = first?.path?.join('.') ?? '';
+      const detail = first?.message ?? 'Invalid request.';
       return reply.status(400).send({
         ok: false,
-        error: { code: 'VALIDATION', message: first?.message ?? 'Invalid request.' },
+        error: { code: 'VALIDATION', message: path ? `${path}: ${detail}` : detail },
       });
     }
     const e = err as { statusCode?: number; message?: string };

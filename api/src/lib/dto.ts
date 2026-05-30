@@ -153,7 +153,11 @@ export const parseBody = <T>(schema: { parse: (input: unknown) => T }, input: un
   } catch (err) {
     if (err instanceof ZodError) {
       const first = err.errors[0];
-      throw new AppError(400, 'VALIDATION', first?.message ?? 'Invalid request.');
+      // Include the field path so 400s are diagnosable from the response/logs
+      // instead of a bare "Invalid url".
+      const path = first?.path?.join('.') ?? '';
+      const detail = first?.message ?? 'Invalid request.';
+      throw new AppError(400, 'VALIDATION', path ? `${path}: ${detail}` : detail);
     }
     throw err;
   }
