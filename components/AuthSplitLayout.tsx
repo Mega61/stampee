@@ -142,35 +142,35 @@ const MODE_CONFIG: Record<AuthMode, ThemeConfig> = {
   staff: {
     leftBg: "bg-[#f4eee7]",
     rightBg: "bg-[#b2781f]",
-    navLinkLabel: "Owner login",
+    navLinkLabel: "Acceso propietario",
     navLinkTo: "/login",
-    showcaseEyebrow: "Team access",
-    showcaseTitle: "Fast, secure staff access.",
-    showcaseCopy: "Staff can sign in with email, PIN, and Org ID, then move directly into issue and kiosk flows.",
-    showcaseSlug: "/brand/staff",
+    showcaseEyebrow: "Acceso del equipo",
+    showcaseTitle: "Acceso de personal rápido y seguro.",
+    showcaseCopy: "El personal inicia sesión con correo, PIN e ID del negocio, y pasa directo a emitir tarjetas y al modo kiosco.",
+    showcaseSlug: "/negocio/staff",
     card: {
-      eyebrow: "Staff portal",
-      title: "PIN-protected, owner-scoped.",
-      copy: "Keep staff access separate from owner settings while staying ready for queue and kiosk traffic.",
-      list: ["Email + PIN", "Org-scoped access", "Kiosk-ready flow"],
+      eyebrow: "Portal del personal",
+      title: "Protegido con PIN, ligado al negocio.",
+      copy: "Mantén el acceso del personal separado de la configuración del propietario y listo para la fila y el modo kiosco.",
+      list: ["Correo + PIN", "Acceso por negocio", "Listo para kiosco"],
       className: "bg-[linear-gradient(180deg,#9c5324_0%,#6d3418_100%)] text-white shadow-[0_38px_120px_-60px_rgba(49,19,4,0.7)]",
     },
     accent: {
-      title: "Scan and issue",
-      copy: "Move from queue to customer card in a few taps.",
+      title: "Escanea y emite",
+      copy: "Pasa de la fila a la tarjeta del cliente en pocos toques.",
       className: "bg-[linear-gradient(180deg,#2440d1_0%,#13279a_100%)] text-white shadow-[0_26px_90px_-48px_rgba(16,34,123,0.7)]",
       icon: ScanLine,
     },
     utility: {
-      title: "Org check",
-      value: "Verified",
-      rows: ["PIN access", "Kiosk handoff", "Scoped staff login"],
+      title: "Verificación de negocio",
+      value: "Verificado",
+      rows: ["Acceso con PIN", "Entrega a kiosco", "Inicio por negocio"],
       className: "bg-[#ead6bc] text-[#473521] shadow-[0_28px_96px_-52px_rgba(60,31,7,0.48)]",
     },
     pills: [
-      { label: "/brand/staff", className: "bg-[#f4f1ec] text-[#1f1d19]", icon: LockKeyhole },
-      { label: "PIN access", className: "bg-white/88 text-[#3c342a]", icon: ShieldCheck },
-      { label: "Kiosk ready", className: "bg-white/72 text-[#3c342a]", icon: ScanLine },
+      { label: "/negocio/staff", className: "bg-[#f4f1ec] text-[#1f1d19]", icon: LockKeyhole },
+      { label: "Acceso con PIN", className: "bg-white/88 text-[#3c342a]", icon: ShieldCheck },
+      { label: "Listo para kiosco", className: "bg-white/72 text-[#3c342a]", icon: ScanLine },
     ],
     actions: [ShieldCheck, ScanLine, LockKeyhole],
   },
@@ -260,7 +260,7 @@ const DesktopShowcase: React.FC<{ theme: ThemeConfig }> = ({ theme }) => {
               <AccentIcon className="h-6 w-6" strokeWidth={2} />
             </div>
             <span className="rounded-full bg-white/14 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/80">
-              Featured
+              Destacado
             </span>
           </div>
           <p className="mt-7 text-[1.8rem] font-semibold leading-[1.02] tracking-tight">{theme.accent.title}</p>

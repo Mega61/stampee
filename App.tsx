@@ -226,7 +226,7 @@ const PublicCardWrapper: React.FC = () => {
   if (!cardData) {
     return (
       <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        Card not found.
+        Tarjeta no encontrada.
       </div>
     );
   }
@@ -278,10 +278,10 @@ const PublicCardWrapper: React.FC = () => {
               <div className="mx-auto mb-3 h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
                 <Lock size={22} className="text-gray-600" />
               </div>
-              <h2 className="text-xl font-bold text-gray-900">Redeemed</h2>
-              <p className="mt-1 text-sm text-gray-600">This card is closed.</p>
+              <h2 className="text-xl font-bold text-gray-900">Canjeada</h2>
+              <p className="mt-1 text-sm text-gray-600">Esta tarjeta está cerrada.</p>
               <div className="mt-3 text-xs text-gray-500 font-mono">
-                Card ID: {card.uniqueId}
+                ID de tarjeta: {card.uniqueId}
               </div>
             </div>
           </div>
@@ -346,7 +346,7 @@ const StaffScanEntryWrapper: React.FC = () => {
   if (!context) {
     return (
       <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        Card not found.
+        Tarjeta no encontrada.
       </div>
     );
   }
@@ -354,7 +354,7 @@ const StaffScanEntryWrapper: React.FC = () => {
   if (!currentUser || !currentOwner) {
     return (
       <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        Redirecting to staff login...
+        Redirigiendo al inicio de sesión del personal...
       </div>
     );
   }
@@ -363,9 +363,9 @@ const StaffScanEntryWrapper: React.FC = () => {
     return (
       <div className="h-screen flex items-center justify-center bg-background px-6">
         <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-center shadow-sm">
-          <h1 className="text-xl font-semibold text-foreground">Wrong business</h1>
+          <h1 className="text-xl font-semibold text-foreground">Negocio incorrecto</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            This card is not part of your business.
+            Esta tarjeta no pertenece a tu negocio.
           </p>
         </div>
       </div>
@@ -374,7 +374,7 @@ const StaffScanEntryWrapper: React.FC = () => {
 
   return (
     <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-      Opening kiosk...
+      Abriendo kiosco...
     </div>
   );
 };

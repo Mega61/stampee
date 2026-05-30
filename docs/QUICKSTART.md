@@ -15,174 +15,128 @@ This assumes the VM already runs:
 - a **Caddy** reverse proxy (with Cloudflare DNS in front), on a Docker network
 - a **shared Postgres** (also used by Strapi), on another Docker network
 
-Stampee adds only its two containers (+ a one-shot migrator). It lives in its own
-`loyalty` schema inside the shared Postgres, so it never touches Strapi's `public`
-schema. No app code changes are needed — the API sets `search_path = loyalty,
-public` on every connection and the migrator creates the schema itself.
+Stampee adds only its two containers (+ a one-shot migrator). It runs in its
+**own database** inside the shared Postgres instance (separate from Strapi's), so
+the two never touch. No app code changes are needed — the migrator creates a
+`loyalty` schema inside that database and the API sets `search_path = loyalty,
+public` per connection.
 
 > For purely local dev with a self-contained Postgres + Caddy, use
 > `infra/docker-compose.yml` instead. This guide uses `infra/docker-compose.prod.yml`.
 
 ---
 
-## 0. Discover your VM specifics
+## 0. Prerequisites (same shared infra as Strapi)
 
-SSH into the VM and grab the real values you'll plug into the env files:
+This stack reuses exactly what your Strapi stack already uses:
 
-```bash
-# The two external Docker networks — note the Caddy one (web) and Postgres one (data):
-docker network ls
-
-# Confirm the Postgres container's data network + the name/alias to use as DB host:
-docker inspect <postgres-container> --format '{{json .NetworkSettings.Networks}}'
-```
-
-You also need:
-
-- the **existing database name** that will host the `loyalty` schema
-- a Postgres **superuser/owner login** (to create the dedicated Stampee role)
-- two **hostnames**, already pointed at the VM in Cloudflare DNS:
+- external Docker networks **`web`** (Caddy) and **`data`** (Postgres) — confirm
+  with `docker network ls`
+- the shared Postgres reachable at host **`postgres-transversal`** on `data`
+- a Postgres **superuser login** (to create Stampee's database + role)
+- two **hostnames** already pointed at the VM in Cloudflare DNS:
   - `loyalty.goldenbeautystudio.com.co` — the Admin UI / customer pages (SPA)
   - `api.loyalty.goldenbeautystudio.com.co` — the API
 
+If any of those names differ on your VM, adjust the compose file / env vars
+accordingly (`STAMPEE_DB_HOST`, the `networks:` block).
+
 ---
 
-## 1. Get both images (on the VM)
+## 1. Publish the images (CI) and let Portainer pull them
 
-Pull the CI-built images (recommended) or build them on the VM.
+GitHub Actions builds and pushes both images on every push to `main`:
+`ghcr.io/mega61/stampee-api` and `ghcr.io/mega61/stampee-spa` (`:latest` + a
+`:<sha>` tag) — see `.github/workflows/build-api.yml` and `build-spa.yml`. The
+Portainer stack pulls these by tag, exactly like the Strapi stack does.
 
-**Option A — pull from GHCR (recommended).** GitHub Actions builds and pushes
-`ghcr.io/mega61/stampee-api` and `ghcr.io/mega61/stampee-spa` (`:latest` and a
-`:<sha>` tag) on push to `main` (see `.github/workflows/build-api.yml` and
-`build-spa.yml`). On the VM:
-
-```bash
-# PAT with read:packages scope (skip the login if you make the packages public).
-echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
-docker pull ghcr.io/mega61/stampee-api:latest
-docker pull ghcr.io/mega61/stampee-spa:latest
-```
+Make sure Portainer can pull them — either:
+- make the two GHCR packages **public** (repo → Packages → package → visibility), or
+- add a registry in **Portainer → Registries** (`ghcr.io`, your GitHub user, a
+  PAT with `read:packages`).
 
 > **The SPA bakes its API URL at build time.** Vite inlines `VITE_API_URL` into
 > the JS bundle when the image is built (like Strapi's `STRAPI_ADMIN_BACKEND_URL`).
-> The build workflow is already set to `https://api.loyalty.goldenbeautystudio.com.co`
-> / `https://loyalty.goldenbeautystudio.com.co` in `.github/workflows/build-spa.yml`.
+> It's already set to `https://api.loyalty.goldenbeautystudio.com.co` /
+> `https://loyalty.goldenbeautystudio.com.co` in `.github/workflows/build-spa.yml`.
 > Changing the API domain later means rebuilding the SPA image.
-
-**Option B — build on the VM.** Build context **must be the repo root**:
-
-```bash
-git clone https://github.com/Mega61/stampee.git /opt/stampee
-cd /opt/stampee
-docker build -f infra/Dockerfile.api -t stampee-api:0.1.0 .
-docker build -f infra/Dockerfile.spa -t stampee-spa:0.1.0 \
-  --build-arg VITE_API_URL=https://api.loyalty.goldenbeautystudio.com.co \
-  --build-arg VITE_APP_URL=https://loyalty.goldenbeautystudio.com.co .
-```
-Then set `API_IMAGE`/`SPA_IMAGE` accordingly in `infra/.env.prod`.
 
 ---
 
-## 2. Create the dedicated Postgres role
+## 2. Create Stampee's database + role
 
-Connect to the shared Postgres as the superuser and create a login role for
-Stampee. It only needs to create + use its own `loyalty` schema in the existing
-database:
+Stampee gets its **own database** in the shared Postgres instance (separate from
+Strapi's), owned by a dedicated login role. Run the SQL as a Postgres superuser.
+
+First find the Postgres container and open a `psql` shell inside it:
+
+```bash
+docker ps                                              # find the Postgres container name
+docker exec -it <postgres-container> psql -U <superuser> -d postgres
+```
+
+`<superuser>` is the Postgres admin role — usually `postgres`, or the
+`POSTGRES_USER` the container was started with. `-it` gives an interactive shell;
+`-d postgres` connects to the default admin database. At the `postgres=#` prompt:
 
 ```sql
 CREATE ROLE loyalty_user LOGIN PASSWORD '<a-strong-password>';
-GRANT CONNECT, CREATE ON DATABASE <existing-db> TO loyalty_user;
+CREATE DATABASE stampee OWNER loyalty_user;
+\q
 ```
 
-The migrator (next step) creates the `loyalty` schema and all its tables/functions
-as this role.
+As the **owner** of `stampee`, `loyalty_user` can create the `loyalty` schema and
+the `pgcrypto`/`citext` extensions itself (both are trusted on Postgres 16), so
+the migrator runs without superuser rights.
+
+> One-shot alternative (no interactive shell — pipe the SQL in with `-i`):
+> ```bash
+> docker exec -i <postgres-container> psql -U <superuser> -d postgres <<'SQL'
+> CREATE ROLE loyalty_user LOGIN PASSWORD '<a-strong-password>';
+> CREATE DATABASE stampee OWNER loyalty_user;
+> SQL
+> ```
 
 ---
 
-## 3. Fill the env files (in `infra/`)
+## 3. Deploy the stack in Portainer
 
-```bash
-cd /opt/stampee/infra
-cp .env.prod.example .env.prod
-cp .env.api.example  .env.api
-```
+In **Portainer → Stacks → Add stack**, name it `stampee`, choose the **Web editor**,
+and paste the contents of [`infra/docker-compose.prod.yml`](../infra/docker-compose.prod.yml).
+It mirrors your Strapi stack: hardcoded GHCR images, inline `environment:`, and the
+same external `web` + `data` networks (Postgres host `postgres-transversal`).
 
-**`infra/.env.prod`** — compose substitution:
+Under **Environment variables** add the three secrets (this is why there's no
+`.env` file — Portainer injects them):
 
-```ini
-API_IMAGE=ghcr.io/mega61/stampee-api:latest   # or stampee-api:0.1.0 if built locally
-SPA_IMAGE=ghcr.io/mega61/stampee-spa:latest   # or stampee-spa:0.1.0 if built locally
-WEB_NETWORK=<caddy-network-from-step-0>
-DATA_NETWORK=<postgres-network-from-step-0>
-```
+| Name                  | Value                                    |
+| --------------------- | ---------------------------------------- |
+| `STAMPEE_DB_PASSWORD` | the `loyalty_user` password from step 2  |
+| `JWT_ACCESS_SECRET`   | a fresh ≥32-char random string           |
+| `JWT_REFRESH_SECRET`  | a different fresh ≥32-char random string |
 
-**`infra/.env.api`** — API config. Set at minimum:
+Everything else (DB user/host/name, public URLs, ports) is already baked into the
+compose file with sensible defaults — override only if needed
+(`STAMPEE_DB_USER`, `STAMPEE_DB_NAME`, `STAMPEE_DB_HOST`, `RESEND_API_KEY`,
+`GCS_BUCKET`, `GCS_PROJECT_ID`). Then click **Deploy the stack**.
 
-```ini
-NODE_ENV=production
-PORT=3001
+The stack starts three containers:
+- `stampee-migrate` — applies migrations, then **exits 0** (shows as "exited" in
+  Portainer — that's expected, not a crash; check its logs show `apply 0001_…`)
+- `stampee-api` — the backend (waits for migrate to finish)
+- `stampee-spa` — the Admin + customer UI
 
-# Reaches the shared Postgres over the data network. Host = the Postgres
-# container name/alias on that network. Same DB as Strapi; Stampee uses the
-# loyalty schema (handled automatically).
-DATABASE_URL=postgres://loyalty_user:<password>@<postgres-host>:5432/<existing-db>
-PG_POOL_SIZE=10
-
-# Both must be >=32 chars. Use fresh random values.
-JWT_ACCESS_SECRET=<32+ random chars>
-JWT_REFRESH_SECRET=<32+ random chars>
-JWT_ACCESS_TTL=15m
-JWT_REFRESH_TTL=30d
-
-# Behind Caddy/Cloudflare (HTTPS). Host-only cookie is fine.
-COOKIE_SECURE=true
-COOKIE_DOMAIN=
-
-BCRYPT_COST=12
-PIN_BCRYPT_COST=10
-
-# Public URLs (must be valid URLs). SPA_ORIGIN MUST equal the Admin UI's URL —
-# the API only accepts browser requests (CORS) from this origin.
-API_PUBLIC_URL=https://api.loyalty.goldenbeautystudio.com.co
-SPA_ORIGIN=https://loyalty.goldenbeautystudio.com.co
-APP_PUBLIC_URL=https://loyalty.goldenbeautystudio.com.co
-
-# Email: 'console' just logs the message (incl. the owner verify link) to the
-# API logs — fine to start. Switch to 'resend' + a real key for real emails.
-EMAIL_ADAPTER=console
-RESEND_API_KEY=
-EMAIL_FROM=Stampee <no-reply@loyalty.goldenbeautystudio.com.co>
-
-# GCS image uploads. Leave GCS_BUCKET blank to start (solid-color cards work
-# without it); set it up via section 8 when you want logo/background uploads.
-GCS_BUCKET=
-GCS_PROJECT_ID=
-GOOGLE_APPLICATION_CREDENTIALS=
-GCS_PUBLIC_HOST=https://storage.googleapis.com
-
-LOG_LEVEL=info
-```
+> Password caveat: `DATABASE_URL` is assembled as a URL, so keep
+> `STAMPEE_DB_PASSWORD` URL-safe (letters/digits/`-_`) or URL-encode special
+> characters.
+>
+> CLI alternative (no Portainer): `cp infra/.env.prod.example infra/.env.prod`,
+> fill it, then
+> `docker compose --env-file infra/.env.prod -f infra/docker-compose.prod.yml up -d`.
 
 ---
 
-## 4. Bring up the stack
-
-```bash
-cd /opt/stampee/infra
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
-```
-
-This starts `migrate` (applies migrations, then exits), `api`, and `spa`. Confirm:
-
-```bash
-docker logs stampee-migrate      # should list "apply 0001_..." etc.
-docker logs -f stampee-api       # "listening" with no Postgres errors
-docker ps                        # stampee-api and stampee-spa running
-```
-
----
-
-## 5. Route both hostnames through Caddy
+## 4. Route both hostnames through Caddy
 
 Add two site blocks to your **central Caddyfile** and reload. This works because
 `stampee-api` and `stampee-spa` share the `web` network with Caddy:
@@ -212,7 +166,7 @@ curl -I https://loyalty.goldenbeautystudio.com.co/          # -> 200, serves the
 
 ---
 
-## 6. Bootstrap your owner account (one-time)
+## 5. Bootstrap your owner account (one-time)
 
 Stampee is single-business by design — the Admin UI has **no public sign-up**
 (the login page is "owner access only"). So create the one owner account with a
@@ -238,20 +192,20 @@ curl -s -X POST $BASE/auth/signup -H "Content-Type: application/json" -d '{
 
 ---
 
-## 7. Manage everything in the Admin UI
+## 6. Manage everything in the Admin UI
 
 Open **`https://loyalty.goldenbeautystudio.com.co/login`** and sign in with the
-owner email + password from step 6. You land on the dashboard. From the sidebar:
+owner email + password from step 5. You land on the dashboard. From the sidebar:
 
-| Do this | Where |
-|---|---|
-| **Create a loyalty card** | **Gallery** → pick a template → **Card Editor**: set name, reward, number of stamps, colors, icon, (logo/background if GCS is set up) → **Save** |
-| Enable/disable or delete a card | **Campaigns** |
-| **Issue a card** to a customer, **add stamps**, **redeem** | **Issued Cards** (this is the day-to-day counter screen) |
-| Add / edit customers | **Customers** |
-| Create **staff** logins (name + PIN) | **Settings** |
-| See activity & stats | **Analytics** / **Transactions** |
-| Change business name, slug, password | **Settings** |
+| Do this                                                    | Where                                                                                                                                            |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Create a loyalty card**                                  | **Gallery** → pick a template → **Card Editor**: set name, reward, number of stamps, colors, icon, (logo/background if GCS is set up) → **Save** |
+| Enable/disable or delete a card                            | **Campaigns**                                                                                                                                    |
+| **Issue a card** to a customer, **add stamps**, **redeem** | **Issued Cards** (this is the day-to-day counter screen)                                                                                         |
+| Add / edit customers                                       | **Customers**                                                                                                                                    |
+| Create **staff** logins (name + PIN)                       | **Settings**                                                                                                                                     |
+| See activity & stats                                       | **Analytics** / **Transactions**                                                                                                                 |
+| Change business name, slug, password                       | **Settings**                                                                                                                                     |
 
 Customer- and staff-facing pages (no login needed for customers):
 
@@ -271,7 +225,7 @@ That's the whole management workflow — all in the browser.
 
 ---
 
-## 8. (Optional) Enable image uploads — GCS bucket
+## 7. (Optional) Enable image uploads — GCS bucket
 
 Needed only if you want to upload **logos/backgrounds** in the Card Editor
 (solid-color cards work without it). Images live in a **private** GCS bucket and
@@ -344,16 +298,14 @@ echo "Using service account: $SA"
    EOF
    gcloud storage buckets update gs://$BUCKET --cors-file=cors.json
    ```
-5. **Wire it in `infra/.env.api`** and restart the API:
-   ```ini
-   GCS_BUCKET=<your-bucket-name>          # the $BUCKET value above
-   GCS_PROJECT_ID=<your-project-id>       # the $PROJECT value above
-   GOOGLE_APPLICATION_CREDENTIALS=        # blank — uses the VM service account (ADC)
-   GCS_PUBLIC_HOST=https://storage.googleapis.com
+5. **Wire it into the stack.** In Portainer, add two **Environment variables**
+   to the `stampee` stack and redeploy:
    ```
-   ```bash
-   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+   GCS_BUCKET=<your-bucket-name>     # the $BUCKET value above
+   GCS_PROJECT_ID=<your-project-id> # the $PROJECT value above
    ```
+   (`GOOGLE_APPLICATION_CREDENTIALS` stays empty — the API uses the VM's service
+   account via ADC.) Redeploy the stack to pick them up.
 
 Now logo/background upload works in the Card Editor. A 403 mentioning `signBlob`
 or `iam.serviceAccounts.signBlob` (visible in `docker logs stampee-api`) means the
@@ -370,12 +322,13 @@ background ≤ 6 MB jpg/png/webp.)
 
 ## Ops & next steps
 
-- **Logs**: `docker logs -f stampee-api` / `docker logs -f stampee-spa`
-- **Re-run migrations** (idempotent): from `infra/`
-  `docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate`
-- **Deploy a new build**: rebuild/repull the image with a new tag, bump
-  `API_IMAGE`/`SPA_IMAGE` in `.env.prod`, then
-  `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d`
-- **Real emails** (password reset, verification): set `EMAIL_ADAPTER=resend` +
-  `RESEND_API_KEY` in `.env.api` and restart.
-- **Image uploads**: section 8 (GCS bucket).
+- **Logs**: in Portainer open the `stampee-api` / `stampee-spa` container logs
+  (or `docker logs -f stampee-api`).
+- **Deploy a new build**: CI pushes a new `:latest` on each merge to `main`. In
+  Portainer, open the stack → **Update / Re-pull image** (or **Pull and redeploy**)
+  to pick it up. Pin a `:<sha>` tag in the compose file for reproducible deploys.
+- **Re-run migrations** (idempotent): re-deploying the stack re-runs the
+  `stampee-migrate` one-shot; or `docker compose -f docker-compose.prod.yml run --rm stampee-migrate`.
+- **Real emails** (password reset, verification): set `EMAIL_ADAPTER` to `resend`
+  in the compose env + add `RESEND_API_KEY` as a stack env var, then redeploy.
+- **Image uploads**: section 7 (GCS bucket).

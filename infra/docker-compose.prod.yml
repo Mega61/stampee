@@ -1,58 +1,92 @@
-# Stampee API for the SHARED VM.
+# Stampee stack — Portainer (standalone compose) deployment.
 #
-# Unlike docker-compose.yml (which ships its own Postgres + Caddy for local
-# dev / reference), this file contributes ONLY the Stampee API and its one-shot
-# migrator. Postgres and Caddy already run on the VM on external Docker
-# networks; we attach to them:
-#   - `web`  : the network your Caddy reverse proxy is on (so it can route to us)
-#   - `data` : the network your shared Postgres is on (so we can reach it)
+# Deploy: Portainer -> Stacks -> Add stack -> Web editor -> paste this file.
+# Then set these under the stack's "Environment variables" section:
+#   STAMPEE_DB_PASSWORD   (password of the loyalty_user role from QUICKSTART §2)
+#   JWT_ACCESS_SECRET     (>=32 random chars)
+#   JWT_REFRESH_SECRET    (>=32 random chars)
+# Optional (leave unset until needed):
+#   RESEND_API_KEY, GCS_BUCKET, GCS_PROJECT_ID
+#   STAMPEE_DB_USER (default loyalty_user), STAMPEE_DB_NAME (default stampee),
+#   STAMPEE_DB_HOST (default postgres-transversal)
 #
-# Bring up (from infra/):
-#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+# Assumes the same external networks as the Strapi stack:
+#   web  -> the Caddy reverse proxy network
+#   data -> the shared Postgres network (host `postgres-transversal`)
+# Stampee uses its OWN database on that Postgres (see QUICKSTART §2).
 #
-# The API is reached by Caddy via the container name `stampee-api` on the web
-# network — add a matching `reverse_proxy stampee-api:3001` site to your
-# central Caddyfile. See docs/QUICKSTART.md.
+# Caddy routes to these by container name on the `web` network:
+#   loyalty.goldenbeautystudio.com.co      -> reverse_proxy stampee-spa:80
+#   api.loyalty.goldenbeautystudio.com.co  -> reverse_proxy stampee-api:3001
+#
+# Images are built + pushed by .github/workflows/build-api.yml / build-spa.yml.
+# Portainer must be able to pull from GHCR (make the packages public, or add a
+# GHCR registry with a read:packages token in Portainer -> Registries).
+#
+# Note: `stampee-migrate` is a one-shot — it applies migrations and exits 0.
+# Seeing it "exited" in Portainer is expected; it is not a crash.
+
+# Shared env for the API + the one-shot migrator (the migrator imports the same
+# config, so it needs the full set too).
+x-stampee-api-env: &stampee-api-env
+  NODE_ENV: production
+  PORT: "3001"
+  DATABASE_URL: postgres://${STAMPEE_DB_USER:-loyalty_user}:${STAMPEE_DB_PASSWORD}@${STAMPEE_DB_HOST:-postgres-transversal}:5432/${STAMPEE_DB_NAME:-stampee}
+  PG_POOL_SIZE: "10"
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+  JWT_ACCESS_TTL: 15m
+  JWT_REFRESH_TTL: 30d
+  COOKIE_SECURE: "true"
+  COOKIE_DOMAIN: ""
+  BCRYPT_COST: "12"
+  PIN_BCRYPT_COST: "10"
+  API_PUBLIC_URL: https://api.loyalty.goldenbeautystudio.com.co
+  SPA_ORIGIN: https://loyalty.goldenbeautystudio.com.co
+  APP_PUBLIC_URL: https://loyalty.goldenbeautystudio.com.co
+  EMAIL_ADAPTER: console
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: "Stampee <no-reply@loyalty.goldenbeautystudio.com.co>"
+  GCS_BUCKET: ${GCS_BUCKET:-}
+  GCS_PROJECT_ID: ${GCS_PROJECT_ID:-}
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+  GCS_PUBLIC_HOST: https://storage.googleapis.com
+  LOG_LEVEL: info
 
 services:
-  # One-shot. Applies db/migrations/*.sql into the `loyalty` schema of the
-  # shared Postgres, then exits. The api service waits for it to complete.
-  migrate:
-    image: ${API_IMAGE:?set API_IMAGE in .env.prod}
+  # One-shot: applies db/migrations/*.sql into the loyalty schema, then exits 0.
+  stampee-migrate:
     container_name: stampee-migrate
+    image: ghcr.io/mega61/stampee-api:latest
     restart: "no"
-    env_file: [.env.api]
-    networks: [data]
     command: ["node", "dist/scripts/migrate.js"]
+    environment: *stampee-api-env
+    networks:
+      - data
 
-  api:
-    image: ${API_IMAGE:?set API_IMAGE in .env.prod}
-    container_name: stampee-api          # Caddy's reverse_proxy targets this name
+  stampee-api:
+    container_name: stampee-api
+    image: ghcr.io/mega61/stampee-api:latest
     restart: unless-stopped
     depends_on:
-      migrate:
+      stampee-migrate:
         condition: service_completed_successfully
-    env_file: [.env.api]
-    networks: [web, data]                # web = reachable by Caddy; data = reaches Postgres
-    expose: ["3001"]                     # not published to the host; Caddy fronts it
+    environment: *stampee-api-env
+    networks:
+      - web
+      - data
 
-  # Customer-facing + admin React SPA, served as static files by nginx. Pure
-  # frontend — the browser calls the API directly, so it only needs the web
-  # network. Built + pushed by .github/workflows/build-spa.yml (VITE_API_URL
-  # baked in). This is the management UI; it comes up with the rest of the stack.
-  spa:
-    image: ${SPA_IMAGE:-ghcr.io/mega61/stampee-spa:latest}
-    container_name: stampee-spa          # Caddy's reverse_proxy targets this name
+  # Admin + customer React UI (nginx static). The browser calls the API
+  # directly, so this only needs the web network.
+  stampee-spa:
+    container_name: stampee-spa
+    image: ghcr.io/mega61/stampee-spa:latest
     restart: unless-stopped
-    networks: [web]
-    expose: ["80"]
+    networks:
+      - web
 
-# Both networks are created and owned by your existing stack. Set their real
-# names in .env.prod (WEB_NETWORK / DATA_NETWORK). `docker network ls` lists them.
 networks:
   web:
     external: true
-    name: ${WEB_NETWORK:?set WEB_NETWORK in .env.prod}
   data:
     external: true
-    name: ${DATA_NETWORK:?set DATA_NETWORK in .env.prod}

@@ -46,11 +46,11 @@ export const PublicCampaignSignupPage: React.FC = () => {
 
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError('Name is required.');
+      setError('El nombre es obligatorio.');
       return;
     }
     if (!slug || !campaignId) {
-      setError('Invalid signup link.');
+      setError('Enlace de registro inválido.');
       return;
     }
 
@@ -66,8 +66,8 @@ export const PublicCampaignSignupPage: React.FC = () => {
     if (result.outcome === 'issued' || result.outcome === 'redirect_existing') {
       setPreRedirectMessage(
         result.outcome === 'issued'
-          ? 'Generating your loyalty card. Please wait...'
-          : 'Redirecting to your loyalty card. Please wait...'
+          ? 'Generando tu tarjeta de fidelidad. Por favor espera...'
+          : 'Redirigiendo a tu tarjeta de fidelidad. Por favor espera...'
       );
       await new Promise((resolve) => setTimeout(resolve, 900));
       navigate(`/${slug}/${result.uniqueId}`, { replace: true });
@@ -77,7 +77,7 @@ export const PublicCampaignSignupPage: React.FC = () => {
     setSubmitting(false);
 
     if (result.outcome === 'campaign_disabled_no_existing') {
-      setError('New signups are paused for this campaign. If you already have an in-progress card, enter the same email or mobile number you used before.');
+      setError('Los nuevos registros están pausados para esta campaña. Si ya tienes una tarjeta en curso, ingresa el mismo correo o número de celular que usaste antes.');
       return;
     }
 
@@ -95,7 +95,7 @@ export const PublicCampaignSignupPage: React.FC = () => {
   if (!context) {
     return (
       <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        Campaign signup link is invalid.
+        El enlace de registro de la campaña es inválido.
       </div>
     );
   }
@@ -117,30 +117,30 @@ export const PublicCampaignSignupPage: React.FC = () => {
       )}
       <div className="mx-auto w-full max-w-xl">
         <section className="rounded-[2rem] border border-black/[0.08] bg-white p-6 shadow-[0_24px_64px_-38px_rgba(0,0,0,0.35)] sm:p-8">
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.26em] text-[#6e6e73]">Loyalty Signup</p>
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.26em] text-[#6e6e73]">Registro de fidelidad</p>
           <h1 className="mt-3 text-[clamp(1.9rem,5vw,2.7rem)] font-black leading-[0.96] tracking-[-0.03em] text-[#1d1d1f]">
             {context.owner.businessName}
           </h1>
           <p className="mt-3 text-[0.98rem] leading-7 text-[#4f5258]">
-            Join <span className="font-semibold text-[#1d1d1f]">{context.campaign.name}</span> to start collecting stamps.
+            Únete a <span className="font-semibold text-[#1d1d1f]">{context.campaign.name}</span> para empezar a acumular sellos.
           </p>
 
           {disabled && (
             <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-              New signups are currently paused for this campaign. If you already have an in-progress card, enter the same email or mobile to continue.
+              Los nuevos registros están pausados para esta campaña por ahora. Si ya tienes una tarjeta en curso, ingresa el mismo correo o celular para continuar.
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
             <div className="grid gap-2">
               <Label htmlFor="name" className="text-sm font-medium text-[#1d1d1f]">
-                Name <span className="text-[#d73a49]">*</span>
+                Nombre <span className="text-[#d73a49]">*</span>
               </Label>
               <Input
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Your full name"
+                placeholder="Tu nombre completo"
                 autoComplete="name"
                 required
                 className="h-12 rounded-xl border-black/10 text-[#1d1d1f] placeholder:text-[#8f9197]"
@@ -149,7 +149,7 @@ export const PublicCampaignSignupPage: React.FC = () => {
 
             <div className="grid gap-2">
               <Label htmlFor="email" className="text-sm font-medium text-[#1d1d1f]">
-                Email <span className="text-[#6e6e73]">(Optional)</span>
+                Correo <span className="text-[#6e6e73]">(Opcional)</span>
               </Label>
               <Input
                 id="email"
@@ -160,22 +160,22 @@ export const PublicCampaignSignupPage: React.FC = () => {
                 type="email"
                 className="h-12 rounded-xl border-black/10 text-[#1d1d1f] placeholder:text-[#8f9197]"
               />
-              <p className="text-xs leading-5 text-[#6e6e73]">Used for card recovery and reward updates.</p>
+              <p className="text-xs leading-5 text-[#6e6e73]">Se usa para recuperar tu tarjeta y enviarte novedades de recompensas.</p>
             </div>
 
             <div className="grid gap-2">
               <Label htmlFor="mobile" className="text-sm font-medium text-[#1d1d1f]">
-                Mobile Number <span className="text-[#6e6e73]">(Optional)</span>
+                Número de celular <span className="text-[#6e6e73]">(Opcional)</span>
               </Label>
               <Input
                 id="mobile"
                 value={mobile}
                 onChange={(e) => setMobile(e.target.value)}
-                placeholder="09xxxxxxxxx"
+                placeholder="3001234567"
                 autoComplete="tel"
                 className="h-12 rounded-xl border-black/10 text-[#1d1d1f] placeholder:text-[#8f9197]"
               />
-              <p className="text-xs leading-5 text-[#6e6e73]">Helps staff find your card quickly.</p>
+              <p className="text-xs leading-5 text-[#6e6e73]">Ayuda al personal a encontrar tu tarjeta rápidamente.</p>
             </div>
 
             {error && (
@@ -189,7 +189,7 @@ export const PublicCampaignSignupPage: React.FC = () => {
               className="h-12 w-full rounded-xl bg-[#1d1d1f] text-sm font-semibold text-white hover:bg-black/85"
               disabled={submitting}
             >
-              {submitting ? 'Checking your card...' : 'Get My Loyalty Card'}
+              {submitting ? 'Verificando tu tarjeta...' : 'Obtener mi tarjeta de fidelidad'}
             </Button>
           </form>
         </section>

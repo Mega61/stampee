@@ -6,21 +6,21 @@ import { resolveHexAndOpacity, hexToRgba } from '../lib/utils';
 const LottiePlayer = lazy(() => import('lottie-react'));
 
 const COMPLETION_MESSAGES = [
-  "You've got this loyalty thing down to a science. Enjoy your genius-level reward!",
-  "You came, you saw, you conquered. Claim your prize, champ!",
-  "You're one sharp tack! Thanks for sticking with us-enjoy your treat.",
-  "Precision pays off. You've successfully navigated your way to a free reward. Well played.",
-  "Efficiency at its finest. You've maximized your stamps-now it's time to collect the dividend.",
-  "You've officially figured out the secret to winning. Your reward is ready and waiting.",
-  "You make this look easy. Your loyalty card is full and your reward is unlocked. Stay sharp.",
-  "Sharp choice. Enjoy your well-earned treat.",
-  "System hacked. You've unlocked the freebie level!",
-  "Straight A's in loyalty. Class is dismissed-enjoy your reward!",
-  "Flawless strategy. Your reward is officially in play.",
-  "Stamps full. Logic wins. Enjoy!",
-  "You've got the system down. Reward ready!",
-  "Expertly earned. Here's your reward.",
-  "Savvy shopper, sweet reward. It's yours!",
+  "Dominas esto de la fidelidad como todo un experto. ¡Disfruta tu recompensa de nivel genio!",
+  "Llegaste, viste y venciste. ¡Reclama tu premio, campeón!",
+  "¡Eres muy astuto! Gracias por seguir con nosotros: disfruta tu premio.",
+  "La constancia da frutos. Llegaste a tu recompensa gratis. ¡Bien jugado!",
+  "Eficiencia pura. Aprovechaste todos tus sellos: ahora cobra el premio.",
+  "Descubriste el secreto para ganar. Tu recompensa está lista y esperándote.",
+  "Lo haces ver fácil. Tu tarjeta está llena y tu recompensa desbloqueada. Sigue así.",
+  "Buena elección. Disfruta tu premio bien merecido.",
+  "Sistema hackeado. ¡Desbloqueaste el nivel de regalo!",
+  "Sobresaliente en fidelidad. Fin de la clase: ¡disfruta tu recompensa!",
+  "Estrategia impecable. Tu recompensa ya está en juego.",
+  "Sellos completos. La lógica gana. ¡Disfruta!",
+  "Le tomaste el truco al sistema. ¡Recompensa lista!",
+  "Ganado con maestría. Aquí tienes tu recompensa.",
+  "Comprador astuto, dulce recompensa. ¡Es tuya!",
 ];
 
 interface RewardModalProps {
@@ -162,12 +162,12 @@ export const RewardModal: React.FC<RewardModalProps> = ({ isOpen, onClose, loadi
           </div>
           
           <h2 className="text-2xl font-bold">
-            {loading ? "Preparing Reward..." : "Card Completed!"}
+            {loading ? "Preparando recompensa..." : "¡Tarjeta completada!"}
           </h2>
 
           {loading ? (
              <p className="opacity-70" style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}>
-               Preparing your reward...
+               Preparando tu recompensa...
              </p>
           ) : (
             <>
@@ -178,7 +178,7 @@ export const RewardModal: React.FC<RewardModalProps> = ({ isOpen, onClose, loadi
                 style={{ backgroundColor: panelBg.hex, borderColor: borderColor.hex }}
               >
                 <p className="text-xs uppercase tracking-wider mb-1 opacity-70" style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}>
-                  Claim Your Reward
+                  Reclama tu recompensa
                 </p>
                 <p className="text-2xl font-mono font-bold tracking-widest">
                   {rewardName}
@@ -186,7 +186,7 @@ export const RewardModal: React.FC<RewardModalProps> = ({ isOpen, onClose, loadi
               </div>
 
               <p className="text-xs mt-1 opacity-50" style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}>
-                Show this card to the staff of "{businessName}".
+                Muestra esta tarjeta al personal de "{businessName}".
               </p>
             </>
           )}
