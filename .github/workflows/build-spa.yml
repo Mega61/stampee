@@ -24,10 +24,10 @@ env:
   # EDIT these to your real domains before the first push.
   VITE_API_URL: https://api.loyalty.goldenbeautystudio.com.co
   VITE_APP_URL: https://loyalty.goldenbeautystudio.com.co
-  # Google OAuth Web client ID for "Sign in with Google". It's public (safe to
-  # bake into the bundle), so it can live in a repo secret/variable as below or
-  # simply be hardcoded here. Leave empty to disable the Google button.
-  VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+  # Google OAuth Web client ID for "Sign in with Google". It's PUBLIC (it ends up
+  # in the JS bundle regardless), so it's fine to hardcode here. Paste your real
+  # client ID below before the first push. Leave empty to disable the Google button.
+  VITE_GOOGLE_CLIENT_ID: 674405194155-gn7p3ep61ie5rsafc5j2dv2fjkq6240v.apps.googleusercontent.com
 
 jobs:
   build-and-push:
