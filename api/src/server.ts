@@ -33,6 +33,7 @@ export const buildApp = async () => {
   await app.register(cors, {
     origin: env.SPA_ORIGIN,
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
   await app.register(cookie);
   await app.register(rateLimit, {
