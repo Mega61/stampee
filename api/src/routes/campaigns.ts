@@ -5,7 +5,7 @@ import { AppError } from '../lib/errors.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { toCampaignDtoSigned, parseBody, type CampaignRow } from '../lib/dto.js';
 import { CampaignBody, UpdateEnabledBody } from '../schemas/campaigns.js';
-import { signedReadUrl } from '../storage/gcs.js';
+import { signedReadUrl, toStoredAssetRef } from '../storage/gcs.js';
 import { randomUUID } from 'node:crypto';
 
 const campaignValuesFromBody = (body: CampaignBody, ownerId: string, id: string) => ({
@@ -16,9 +16,9 @@ const campaignValuesFromBody = (body: CampaignBody, ownerId: string, id: string)
   description: body.description,
   reward_name: body.rewardName,
   tagline: body.tagline ?? null,
-  background_image: body.backgroundImage ?? null,
+  background_image: toStoredAssetRef(body.backgroundImage),
   background_opacity: body.backgroundOpacity ?? 100,
-  logo_image: body.logoImage ?? null,
+  logo_image: toStoredAssetRef(body.logoImage),
   show_logo: body.showLogo ?? true,
   title_size: body.titleSize ?? null,
   icon_key: body.iconKey,

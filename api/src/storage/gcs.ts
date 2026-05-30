@@ -108,3 +108,32 @@ export const isValidPath = (path: string): boolean => {
   // Expected shape: {ownerId}/{logo|background}/{uuid}.{ext}
   return /^[0-9a-f-]{36}\/(logo|background)\/[0-9a-f-]{36}\.(jpg|png|webp|svg)$/i.test(path);
 };
+
+// Substring form of the path shape above, for pulling the path back out of a
+// full signed-GET URL's pathname.
+const ASSET_PATH_RE = /[0-9a-f-]{36}\/(?:logo|background)\/[0-9a-f-]{36}\.(?:jpg|png|webp|svg)/i;
+
+// Normalize a logo/background reference coming in on a write request into the
+// canonical value to store. The DB must hold either a storage *path* or an
+// external URL — never one of our own short-lived signed-GET URLs (those
+// expire). Cases:
+//   - empty            -> null
+//   - our signed URL   -> the embedded storage path (de-signed)
+//   - external URL     -> kept as-is (the SPA allows pasting hosted image URLs)
+//   - already a path   -> kept as-is
+export const toStoredAssetRef = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const pathname = decodeURIComponent(new URL(trimmed).pathname);
+      const match = pathname.match(ASSET_PATH_RE);
+      if (match) return match[0];
+    } catch {
+      // Not parseable as a URL — fall through and store the raw string.
+    }
+    return trimmed;
+  }
+  return trimmed;
+};

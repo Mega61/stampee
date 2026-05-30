@@ -11,9 +11,12 @@ export const CampaignBody = z.object({
   description: z.string().max(2000).default(''),
   rewardName: z.string().max(200).default(''),
   tagline: z.string().max(500).optional().nullable(),
-  backgroundImage: z.string().url().optional().nullable(),
+  // Either a private-bucket storage path ({ownerId}/{kind}/{uuid}.{ext}) or an
+  // external image URL — the API normalizes/serves both. Not `.url()`: paths
+  // are not URLs.
+  backgroundImage: z.string().max(2048).optional().nullable(),
   backgroundOpacity: z.number().int().min(0).max(100).optional(),
-  logoImage: z.string().url().optional().nullable(),
+  logoImage: z.string().max(2048).optional().nullable(),
   showLogo: z.boolean().optional(),
   titleSize: z.string().max(50).optional().nullable(),
   iconKey: z.string().min(1).max(80),
