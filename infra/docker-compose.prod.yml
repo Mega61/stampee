@@ -36,6 +36,17 @@ services:
     networks: [web, data]                # web = reachable by Caddy; data = reaches Postgres
     expose: ["3001"]                     # not published to the host; Caddy fronts it
 
+  # Customer-facing + admin React SPA, served as static files by nginx. Pure
+  # frontend — the browser calls the API directly, so it only needs the web
+  # network. Built + pushed by .github/workflows/build-spa.yml (VITE_API_URL
+  # baked in). This is the management UI; it comes up with the rest of the stack.
+  spa:
+    image: ${SPA_IMAGE:-ghcr.io/mega61/stampee-spa:latest}
+    container_name: stampee-spa          # Caddy's reverse_proxy targets this name
+    restart: unless-stopped
+    networks: [web]
+    expose: ["80"]
+
 # Both networks are created and owned by your existing stack. Set their real
 # names in .env.prod (WEB_NETWORK / DATA_NETWORK). `docker network ls` lists them.
 networks:

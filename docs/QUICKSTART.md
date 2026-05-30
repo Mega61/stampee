@@ -1,19 +1,24 @@
-# Quick Start — Deploy the Stampee API to the shared GCP VM
+# Quick Start — Deploy Stampee (API + Admin UI) on the shared GCP VM
 
-Fastest path to a running backend so you can create a business loyalty card.
-Backend only: no SPA, no signup UI. You create the business → campaign →
-customer → card with a few `curl` calls.
+Get the full Stampee stack running on the VM so you can **manage everything from
+the web Admin UI** — create loyalty cards, issue them, add stamps, redeem, manage
+customers and staff. No day-to-day `curl` needed; the only command-line step is a
+one-time owner account bootstrap.
+
+The deployment is two containers behind your existing edge:
+
+- **API** (`stampee-api`) — the Fastify backend (JSON), on port 3001
+- **SPA** (`stampee-spa`) — the React Admin UI + customer card pages (nginx), on port 80
 
 This assumes the VM already runs:
 
 - a **Caddy** reverse proxy (with Cloudflare DNS in front), on a Docker network
 - a **shared Postgres** (also used by Strapi), on another Docker network
 
-Stampee adds only its **API container** (+ a one-shot migrator). It lives in its
-own `loyalty` schema inside the shared Postgres, so it never touches Strapi's
-`public` schema. No app code changes are needed — the API sets
-`search_path = loyalty, public` on every connection and the migrator creates the
-schema itself.
+Stampee adds only its two containers (+ a one-shot migrator). It lives in its own
+`loyalty` schema inside the shared Postgres, so it never touches Strapi's `public`
+schema. No app code changes are needed — the API sets `search_path = loyalty,
+public` on every connection and the migrator creates the schema itself.
 
 > For purely local dev with a self-contained Postgres + Caddy, use
 > `infra/docker-compose.yml` instead. This guide uses `infra/docker-compose.prod.yml`.
@@ -36,38 +41,45 @@ You also need:
 
 - the **existing database name** that will host the `loyalty` schema
 - a Postgres **superuser/owner login** (to create the dedicated Stampee role)
-- the **API hostname** to expose (e.g. `api.lealtad.<your-domain>`), already
-  pointed at the VM in Cloudflare DNS
+- two **hostnames**, already pointed at the VM in Cloudflare DNS:
+  - `loyalty.goldenbeautystudio.com.co` — the Admin UI / customer pages (SPA)
+  - `api.loyalty.goldenbeautystudio.com.co` — the API
 
 ---
 
-## 1. Get the API image (on the VM)
+## 1. Get both images (on the VM)
 
-You can either pull the image built by CI (recommended) or build it on the VM.
+Pull the CI-built images (recommended) or build them on the VM.
 
 **Option A — pull from GHCR (recommended).** GitHub Actions builds and pushes
-`ghcr.io/mega61/stampee-api:latest` (and a `:<sha>` tag) on every push to `main`
-that touches `api/`, `db/migrations/`, or the Dockerfile
-(see `.github/workflows/build-api.yml`). On the VM, log in once and pull:
+`ghcr.io/mega61/stampee-api` and `ghcr.io/mega61/stampee-spa` (`:latest` and a
+`:<sha>` tag) on push to `main` (see `.github/workflows/build-api.yml` and
+`build-spa.yml`). On the VM:
 
 ```bash
-# A GitHub Personal Access Token with read:packages scope (only needed if the
-# package is private; make it public in the repo's Packages settings to skip).
+# PAT with read:packages scope (skip the login if you make the packages public).
 echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
 docker pull ghcr.io/mega61/stampee-api:latest
+docker pull ghcr.io/mega61/stampee-spa:latest
 ```
-Then set `API_IMAGE=ghcr.io/mega61/stampee-api:latest` in `infra/.env.prod`
-(pin a `:<sha>` tag for reproducible deploys).
 
-**Option B — build on the VM.** The build context **must be the repo root**
-(the image copies both `api/` and `db/migrations/`):
+> **The SPA bakes its API URL at build time.** Vite inlines `VITE_API_URL` into
+> the JS bundle when the image is built (like Strapi's `STRAPI_ADMIN_BACKEND_URL`).
+> The build workflow is already set to `https://api.loyalty.goldenbeautystudio.com.co`
+> / `https://loyalty.goldenbeautystudio.com.co` in `.github/workflows/build-spa.yml`.
+> Changing the API domain later means rebuilding the SPA image.
+
+**Option B — build on the VM.** Build context **must be the repo root**:
 
 ```bash
 git clone https://github.com/Mega61/stampee.git /opt/stampee
 cd /opt/stampee
 docker build -f infra/Dockerfile.api -t stampee-api:0.1.0 .
+docker build -f infra/Dockerfile.spa -t stampee-spa:0.1.0 \
+  --build-arg VITE_API_URL=https://api.loyalty.goldenbeautystudio.com.co \
+  --build-arg VITE_APP_URL=https://loyalty.goldenbeautystudio.com.co .
 ```
-Then set `API_IMAGE=stampee-api:0.1.0` in `infra/.env.prod`.
+Then set `API_IMAGE`/`SPA_IMAGE` accordingly in `infra/.env.prod`.
 
 ---
 
@@ -82,8 +94,8 @@ CREATE ROLE loyalty_user LOGIN PASSWORD '<a-strong-password>';
 GRANT CONNECT, CREATE ON DATABASE <existing-db> TO loyalty_user;
 ```
 
-The migrator (run in the next step) creates the `loyalty` schema and all its
-tables/functions as this role.
+The migrator (next step) creates the `loyalty` schema and all its tables/functions
+as this role.
 
 ---
 
@@ -99,6 +111,7 @@ cp .env.api.example  .env.api
 
 ```ini
 API_IMAGE=ghcr.io/mega61/stampee-api:latest   # or stampee-api:0.1.0 if built locally
+SPA_IMAGE=ghcr.io/mega61/stampee-spa:latest   # or stampee-spa:0.1.0 if built locally
 WEB_NETWORK=<caddy-network-from-step-0>
 DATA_NETWORK=<postgres-network-from-step-0>
 ```
@@ -128,21 +141,20 @@ COOKIE_DOMAIN=
 BCRYPT_COST=12
 PIN_BCRYPT_COST=10
 
-# Public URLs (must be valid URLs). API_PUBLIC_URL is the one that matters for
-# API-only; SPA_ORIGIN/APP_PUBLIC_URL can point at the future SPA host.
-API_PUBLIC_URL=https://api.lealtad.<your-domain>
-SPA_ORIGIN=https://lealtad.<your-domain>
-APP_PUBLIC_URL=https://lealtad.<your-domain>
+# Public URLs (must be valid URLs). SPA_ORIGIN MUST equal the Admin UI's URL —
+# the API only accepts browser requests (CORS) from this origin.
+API_PUBLIC_URL=https://api.loyalty.goldenbeautystudio.com.co
+SPA_ORIGIN=https://loyalty.goldenbeautystudio.com.co
+APP_PUBLIC_URL=https://loyalty.goldenbeautystudio.com.co
 
-# Email: 'console' just logs (fine for the curl flow). Switch to 'resend' +
-# a real key when you want signup verification emails to actually send.
+# Email: 'console' just logs the message (incl. the owner verify link) to the
+# API logs — fine to start. Switch to 'resend' + a real key for real emails.
 EMAIL_ADAPTER=console
 RESEND_API_KEY=
-EMAIL_FROM=Stampee <no-reply@lealtad.<your-domain>>
+EMAIL_FROM=Stampee <no-reply@loyalty.goldenbeautystudio.com.co>
 
-# GCS image uploads. Leave GCS_BUCKET blank to disable uploads for now, or set
-# it up via section 7 below. The VM's attached service account supplies
-# credentials (ADC), so leave GOOGLE_APPLICATION_CREDENTIALS empty.
+# GCS image uploads. Leave GCS_BUCKET blank to start (solid-color cards work
+# without it); set it up via section 8 when you want logo/background uploads.
 GCS_BUCKET=
 GCS_PROJECT_ID=
 GOOGLE_APPLICATION_CREDENTIALS=
@@ -153,30 +165,34 @@ LOG_LEVEL=info
 
 ---
 
-## 4. Bring it up
+## 4. Bring up the stack
 
 ```bash
 cd /opt/stampee/infra
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
 
-The `migrate` service runs first, applies the migrations, and exits; then `api`
-starts. Confirm migrations applied:
+This starts `migrate` (applies migrations, then exits), `api`, and `spa`. Confirm:
 
 ```bash
 docker logs stampee-migrate      # should list "apply 0001_..." etc.
 docker logs -f stampee-api       # "listening" with no Postgres errors
+docker ps                        # stampee-api and stampee-spa running
 ```
 
 ---
 
-## 5. Route it through Caddy
+## 5. Route both hostnames through Caddy
 
-Add a site block to your **central Caddyfile** and reload Caddy. This works
-because `stampee-api` shares the `web` network with Caddy:
+Add two site blocks to your **central Caddyfile** and reload. This works because
+`stampee-api` and `stampee-spa` share the `web` network with Caddy:
 
 ```caddy
-api.lealtad.<your-domain> {
+loyalty.goldenbeautystudio.com.co {
+    reverse_proxy stampee-spa:80
+}
+
+api.loyalty.goldenbeautystudio.com.co {
     reverse_proxy stampee-api:3001
 }
 ```
@@ -187,105 +203,113 @@ Reload Caddy (adjust to your setup):
 docker exec <caddy-container> caddy reload --config /etc/caddy/Caddyfile
 ```
 
-Verify end to end (TLS terminated by Cloudflare/Caddy):
+Verify (TLS terminated by Cloudflare/Caddy):
 
 ```bash
-curl https://api.lealtad.<your-domain>/health      # -> {"ok":true,...} 200
+curl https://api.loyalty.goldenbeautystudio.com.co/health   # -> {"ok":true,...} 200
+curl -I https://loyalty.goldenbeautystudio.com.co/          # -> 200, serves the SPA
 ```
 
 ---
 
-## 6. Create the business + first card (curl)
+## 6. Bootstrap your owner account (one-time)
 
-Auth is cookie-based, so use a cookie jar. Set your base URL once:
-
-```bash
-BASE=https://api.lealtad.<your-domain>
-```
-
-**1) Sign up the owner.** (slug = 3–30 lowercase letters/numbers/hyphens.)
-The API lets an unverified owner log in immediately, so no email step is needed
-for this flow.
+Stampee is single-business by design — the Admin UI has **no public sign-up**
+(the login page is "owner access only"). So create the one owner account with a
+single API call, then never touch the API again:
 
 ```bash
+BASE=https://api.loyalty.goldenbeautystudio.com.co
 curl -s -X POST $BASE/auth/signup -H "Content-Type: application/json" -d '{
-  "email": "you@yourbiz.com",
-  "password": "ChangeMe123",
-  "businessName": "Your Business",
-  "slug": "your-biz"
+  "email": "you@goldenbeautystudio.com.co",
+  "password": "<a-strong-password>",
+  "businessName": "Golden Beauty Studio",
+  "slug": "golden-beauty"
 }'
 ```
 
-**2) Log in** — stores auth cookies in `jar.txt`:
-
-```bash
-curl -s -c jar.txt -X POST $BASE/auth/login -H "Content-Type: application/json" -d '{
-  "email": "you@yourbiz.com",
-  "password": "ChangeMe123"
-}'
-```
-
-**3) Create the campaign** (the loyalty-card template). Note the returned `id`:
-
-```bash
-curl -s -b jar.txt -X POST $BASE/campaigns -H "Content-Type: application/json" -d '{
-  "name": "Coffee Loyalty",
-  "description": "Buy 10 coffees, get the 11th free.",
-  "rewardName": "Free Coffee",
-  "tagline": "Stamp & sip.",
-  "totalStamps": 10,
-  "iconKey": "Coffee",
-  "colors": {"primary":"#7c5e3c","secondary":"#f5e6d3","text":"#2b1d0e","accent":"#c79b6b"},
-  "isEnabled": true
-}'
-```
-
-**4) Create a customer.** Note the returned `id`:
-
-```bash
-curl -s -b jar.txt -X POST $BASE/customers -H "Content-Type: application/json" -d '{
-  "name": "Walk In Customer",
-  "email": "customer@example.com",
-  "status": "Active"
-}'
-```
-
-**5) Issue the card** using the two ids from above:
-
-```bash
-curl -s -b jar.txt -X POST $BASE/cards -H "Content-Type: application/json" -d '{
-  "customerId": "<CUSTOMER_ID>",
-  "campaignId": "<CAMPAIGN_ID>"
-}'
-```
-
-The response includes the card's public `uniqueId`. Card created. ✅
-
-**Sanity check** — list customers with their cards + history:
-
-```bash
-curl -s -b jar.txt "$BASE/customers?include=cards,transactions"
-```
+- `slug` = 3–30 lowercase letters/numbers/hyphens. It's your business's public
+  path (e.g. `loyalty.goldenbeautystudio.com.co/golden-beauty/<card-id>`).
+- You can log in immediately — email verification is **not** required to use the
+  dashboard (you'll just see a "verify" banner).
+- **Optional — clear the verify banner:** with `EMAIL_ADAPTER=console`, the
+  verification link is printed to `docker logs stampee-api`. Open it once to mark
+  the owner verified. (Or set `EMAIL_ADAPTER=resend` + a key to email it for real.)
 
 ---
 
-## 7. (Optional) Enable image uploads — GCS bucket
+## 7. Manage everything in the Admin UI
 
-Campaign **logos/backgrounds** are stored in a **private** GCS bucket and served
-through short-lived **V4 signed URLs** (no public objects). Uploads are also
-presigned: the SPA `PUT`s the file straight to GCS using a signed URL from
-`POST /storage/campaign-assets/presign`. Signing is done server-side with the
-VM's service account via the IAM `signBlob` API — **no JSON keys** (the org has
-`iam.disableServiceAccountKeyCreation`).
+Open **`https://loyalty.goldenbeautystudio.com.co/login`** and sign in with the
+owner email + password from step 6. You land on the dashboard. From the sidebar:
 
-Skip this for the curl-only card flow; do it when you bring up the SPA or want
-logos. Set names first:
+| Do this | Where |
+|---|---|
+| **Create a loyalty card** | **Gallery** → pick a template → **Card Editor**: set name, reward, number of stamps, colors, icon, (logo/background if GCS is set up) → **Save** |
+| Enable/disable or delete a card | **Campaigns** |
+| **Issue a card** to a customer, **add stamps**, **redeem** | **Issued Cards** (this is the day-to-day counter screen) |
+| Add / edit customers | **Customers** |
+| Create **staff** logins (name + PIN) | **Settings** |
+| See activity & stats | **Analytics** / **Transactions** |
+| Change business name, slug, password | **Settings** |
+
+Customer- and staff-facing pages (no login needed for customers):
+
+- **Customer card**: `loyalty.goldenbeautystudio.com.co/<slug>/<uniqueId>` — the
+  digital stamp card a customer opens (QR-friendly).
+- **Public self-signup** (optional): `…/<slug>/join/<campaignId>` — customers
+  enroll themselves and get a card.
+- **Staff portal**: `…/<slug>/staff` — staff sign in with email + PIN to add
+  stamps; `…/<slug>/scan/<uniqueId>` is the QR-scan entry point.
+
+That's the whole management workflow — all in the browser.
+
+> Prefer automation? The same actions are plain REST endpoints
+> (`POST /campaigns`, `POST /customers`, `POST /cards`,
+> `POST /cards/:id/transactions`, …) under `api.loyalty.goldenbeautystudio.com.co`,
+> using the cookie set by `POST /auth/login`. Not needed for normal use.
+
+---
+
+## 8. (Optional) Enable image uploads — GCS bucket
+
+Needed only if you want to upload **logos/backgrounds** in the Card Editor
+(solid-color cards work without it). Images live in a **private** GCS bucket and
+are served through short-lived **V4 signed URLs** (no public objects). Uploads are
+presigned too: the browser `PUT`s straight to GCS. Signing is done server-side
+with the VM's service account via the IAM `signBlob` API — **no JSON keys**.
+
+**Run these on the VM** (where the attached service account + ADC live).
+
+> ⚠️ **VM access scope (read this first).** Using the **default Compute Engine
+> service account** only works if the VM was created with the **`cloud-platform`**
+> access scope. The GCE *default* scope grants storage **read-only**, which blocks
+> both uploads and URL signing. Check it:
+> ```bash
+> gcloud compute instances describe <vm-name> --zone <zone> \
+>   --format='value(serviceAccounts.scopes)'
+> ```
+> If you don't see `https://www.googleapis.com/auth/cloud-platform`, set it (the
+> VM must be stopped):
+> ```bash
+> gcloud compute instances stop <vm-name> --zone <zone>
+> gcloud compute instances set-service-account <vm-name> --zone <zone> \
+>   --scopes=cloud-platform
+> gcloud compute instances start <vm-name> --zone <zone>
+> ```
+
+Set the two values up top; the SA is derived automatically:
 
 ```bash
-PROJECT=<your-gcp-project>
-BUCKET=<your-bucket-name>          # globally unique
-REGION=us-east1                    # pick one close to your users
-SA=media-writer@$PROJECT.iam.gserviceaccount.com   # the VM's attached service account
+PROJECT=$(gcloud config get-value project)   # or: PROJECT=<your-project-id>
+BUCKET=<your-globally-unique-bucket-name>
+REGION=us-central1
+SPA_ORIGIN=https://loyalty.goldenbeautystudio.com.co
+
+# The VM's default Compute Engine service account:
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+SA="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
+echo "Using service account: $SA"
 ```
 
 1. **Create a private, uniform-access bucket:**
@@ -299,33 +323,31 @@ SA=media-writer@$PROJECT.iam.gserviceaccount.com   # the VM's attached service a
    gcloud storage buckets add-iam-policy-binding gs://$BUCKET \
      --member="serviceAccount:$SA" --role="roles/storage.objectAdmin"
    ```
-3. **Let it sign URLs without a key** (impersonate itself for `signBlob`):
+3. **Let it sign URLs without a key** (call `signBlob` as itself):
    ```bash
    gcloud iam service-accounts add-iam-policy-binding $SA \
      --member="serviceAccount:$SA" \
      --role="roles/iam.serviceAccountTokenCreator"
    ```
-   Make sure the VM actually runs as (or can impersonate) this SA — simplest is
-   to attach `media-writer` as the VM's service account.
-4. **CORS** so the browser can `PUT` uploads and `GET` signed reads. Save as
-   `cors.json` (the API requires `Content-Type` + `Cache-Control` on uploads):
-   ```json
+4. **CORS** so the browser can `PUT` uploads and `GET` signed reads (the API
+   requires `Content-Type` + `Cache-Control` on uploads):
+   ```bash
+   cat > cors.json <<EOF
    [
      {
-       "origin": ["https://lealtad.<your-domain>"],
+       "origin": ["$SPA_ORIGIN"],
        "method": ["GET", "PUT"],
        "responseHeader": ["Content-Type", "Cache-Control"],
        "maxAgeSeconds": 3600
      }
    ]
-   ```
-   ```bash
+   EOF
    gcloud storage buckets update gs://$BUCKET --cors-file=cors.json
    ```
 5. **Wire it in `infra/.env.api`** and restart the API:
    ```ini
-   GCS_BUCKET=<your-bucket-name>
-   GCS_PROJECT_ID=<your-gcp-project>
+   GCS_BUCKET=<your-bucket-name>          # the $BUCKET value above
+   GCS_PROJECT_ID=<your-project-id>       # the $PROJECT value above
    GOOGLE_APPLICATION_CREDENTIALS=        # blank — uses the VM service account (ADC)
    GCS_PUBLIC_HOST=https://storage.googleapis.com
    ```
@@ -333,32 +355,27 @@ SA=media-writer@$PROJECT.iam.gserviceaccount.com   # the VM's attached service a
    docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
    ```
 
-Quick check (API-only, no SPA): request a signed upload URL —
-```bash
-curl -s -b jar.txt -X POST $BASE/storage/campaign-assets/presign \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"logo","contentType":"image/png","sizeBytes":12345}'
-```
-A 200 with an `uploadUrl` means signing works. (Limits: logo ≤ 2 MB jpg/png/webp/svg,
+Now logo/background upload works in the Card Editor. A 403 mentioning `signBlob`
+or `iam.serviceAccounts.signBlob` (visible in `docker logs stampee-api`) means the
+scope/role above isn't in effect yet. (Limits: logo ≤ 2 MB jpg/png/webp/svg,
 background ≤ 6 MB jpg/png/webp.)
 
-> **Local dev note:** signing needs a real identity. Run
-> `gcloud auth application-default login` and either impersonate
-> (`--impersonate-service-account=$SA`) or grant your own user
-> `roles/iam.serviceAccountTokenCreator` on the SA.
+> **Org policy note:** if your org enforces `iam.disableServiceAccountKeyCreation`
+> (no JSON keys), this signBlob approach is exactly what you want — it signs with
+> the live identity, no key file. If `signBlob` stays denied on the default SA,
+> the fallback is a dedicated `media-writer` SA granted the same two roles and
+> attached to the VM.
 
 ---
 
 ## Ops & next steps
 
-- **Logs**: `docker logs -f stampee-api`
+- **Logs**: `docker logs -f stampee-api` / `docker logs -f stampee-spa`
 - **Re-run migrations** (idempotent): from `infra/`
   `docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate`
-- **Deploy a new build**: rebuild the image with a new tag, bump `API_IMAGE`
-  in `.env.prod`, then `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d`
-- **Add the web UI later**: build the SPA (`npm run build` at repo root) and add
-  a static `file_server` site for `lealtad.<domain>` in the central Caddyfile.
-  Switch `EMAIL_ADAPTER=resend` (+ a real `RESEND_API_KEY`) so signup
-  verification emails send; the verify-email link flips the owner's `status` to
-  `verified`.
-- **Enable logo/image uploads**: follow section 7 (GCS bucket).
+- **Deploy a new build**: rebuild/repull the image with a new tag, bump
+  `API_IMAGE`/`SPA_IMAGE` in `.env.prod`, then
+  `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d`
+- **Real emails** (password reset, verification): set `EMAIL_ADAPTER=resend` +
+  `RESEND_API_KEY` in `.env.api` and restart.
+- **Image uploads**: section 8 (GCS bucket).

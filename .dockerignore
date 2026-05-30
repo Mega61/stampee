@@ -1,0 +1,18 @@
+# Keep build contexts small and avoid copying host artifacts into images.
+# Applies to both infra/Dockerfile.api and infra/Dockerfile.spa (context = repo root).
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.github
+.claude
+*.log
+npm-debug.log*
+.env
+.env.*
+infra/.env
+infra/.env.*
+.vscode
+.idea
+.DS_Store

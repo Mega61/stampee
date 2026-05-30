@@ -1,0 +1,61 @@
+name: Build and Push Stampee SPA Image
+
+on:
+  push:
+    branches:
+      - main
+    # Rebuild on any frontend/config change. The API + db-only paths are owned
+    # by build-api.yml, so ignore them here to avoid redundant SPA builds.
+    paths-ignore:
+      - 'api/**'
+      - 'db/**'
+      - 'infra/Dockerfile.api'
+      - 'infra/docker-compose*.yml'
+      - 'infra/.env*'
+      - '.github/workflows/build-api.yml'
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: mega61/stampee-spa
+  # Baked into the JS bundle at build time (Vite inlines VITE_*).
+  # EDIT these to your real domains before the first push.
+  VITE_API_URL: https://api.loyalty.goldenbeautystudio.com.co
+  VITE_APP_URL: https://loyalty.goldenbeautystudio.com.co
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./infra/Dockerfile.spa
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            VITE_API_URL=${{ env.VITE_API_URL }}
+            VITE_APP_URL=${{ env.VITE_APP_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
