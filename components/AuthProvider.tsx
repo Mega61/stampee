@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { User } from "../types";
+import { User, ApiKey, ApiKeyWithSecret } from "../types";
 import { api, ApiError, broadcastAuth, onAuthBroadcast } from "../lib/api";
 import { normalizeSlug } from "../lib/slug";
 import {
@@ -8,8 +8,16 @@ import {
   setAdminAccess as dbSetAdminAccess,
   deleteAdmin as dbDeleteAdmin,
 } from "../lib/db/admins";
+import {
+  fetchApiKeys,
+  createApiKey as dbCreateApiKey,
+  revokeApiKey as dbRevokeApiKey,
+} from "../lib/db/apiKeys";
 
 export type AuthResult = { ok: true; user?: User; message?: string } | { ok: false; error: string };
+export type CreateApiKeyResult =
+  | { ok: true; apiKey: ApiKeyWithSecret }
+  | { ok: false; error: string };
 
 interface MeResponse {
   user: User;
@@ -40,6 +48,10 @@ interface AuthContextValue {
   setAdminAccess: (adminId: string, access: "active" | "disabled") => Promise<AuthResult>;
   deleteAdmin: (adminId: string) => Promise<AuthResult>;
   refreshAdmins: () => Promise<void>;
+  apiKeys: ApiKey[];
+  createApiKey: (payload: { name: string; expiresInDays?: number }) => Promise<CreateApiKeyResult>;
+  revokeApiKey: (keyId: string) => Promise<AuthResult>;
+  refreshApiKeys: () => Promise<void>;
   deleteAccount: () => Promise<AuthResult>;
   logout: () => Promise<void>;
   resendVerificationEmail: () => Promise<AuthResult>;
@@ -65,6 +77,7 @@ const PASSWORD_UPDATE_ERROR = "Unable to update your password right now. Please 
 const PASSWORD_RESET_ERROR = "Unable to send a reset link right now. Please try again.";
 const STAFF_ACTION_ERROR = "Unable to complete this staff action right now. Please try again.";
 const ADMIN_ACTION_ERROR = "Unable to complete this admin action right now. Please try again.";
+const API_KEY_ACTION_ERROR = "Unable to complete this API key action right now. Please try again.";
 const ACCOUNT_ACTION_ERROR = "Unable to complete this account action right now. Please try again.";
 
 const GOOGLE_SIGNIN_ERROR_MESSAGE = "No se pudo iniciar sesión con Google. Inténtalo de nuevo.";
@@ -94,6 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentOwner, setCurrentOwner] = useState<User | null>(null);
   const [staffAccounts, setStaffAccounts] = useState<User[]>([]);
   const [adminAccounts, setAdminAccounts] = useState<User[]>([]);
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -102,6 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentOwner(null);
     setStaffAccounts([]);
     setAdminAccounts([]);
+    setApiKeys([]);
     setIsEmailVerified(false);
   }, []);
 
@@ -109,6 +124,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshAdmins = useCallback(async (): Promise<void> => {
     const admins = await fetchAdmins();
     setAdminAccounts(admins);
+  }, []);
+
+  // Owner + admin: pull the integration API-key list. Returns [] otherwise.
+  const refreshApiKeys = useCallback(async (): Promise<void> => {
+    const keys = await fetchApiKeys();
+    setApiKeys(keys);
   }, []);
 
   // Pull the whole session shape (user + owner + staff list) in one call.
@@ -126,12 +147,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         setAdminAccounts([]);
       }
+      // Owner + admin can manage integration API keys.
+      if (data.user.role === "owner" || data.user.role === "admin") {
+        await refreshApiKeys();
+      } else {
+        setApiKeys([]);
+      }
       return data.user;
     } catch {
       clearSession();
       return null;
     }
-  }, [clearSession, refreshAdmins]);
+  }, [clearSession, refreshAdmins, refreshApiKeys]);
 
   // Boot: try to resolve the session once. The api.ts auto-refresh-then-retry
   // means an expired access cookie is silently rotated if the refresh cookie
@@ -399,6 +426,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [currentOwner, currentUser, refreshAdmins],
   );
 
+  // --- Integration API keys — OWNER + ADMIN ------------------------------
+  const canManageKeys = currentUser?.role === "owner" || currentUser?.role === "admin";
+
+  const createApiKey = useCallback(
+    async (payload: { name: string; expiresInDays?: number }): Promise<CreateApiKeyResult> => {
+      if (!canManageKeys) {
+        return { ok: false, error: "Only owners and admins can manage API keys." };
+      }
+      try {
+        const apiKey = await dbCreateApiKey(payload);
+        await refreshApiKeys();
+        return { ok: true, apiKey };
+      } catch (err) {
+        return fail(err, API_KEY_ACTION_ERROR);
+      }
+    },
+    [canManageKeys, refreshApiKeys],
+  );
+
+  const revokeApiKey = useCallback(
+    async (keyId: string): Promise<AuthResult> => {
+      if (!canManageKeys) {
+        return { ok: false, error: "Only owners and admins can manage API keys." };
+      }
+      try {
+        await dbRevokeApiKey(keyId);
+      } catch (err) {
+        return fail(err, API_KEY_ACTION_ERROR);
+      }
+      await refreshApiKeys();
+      return { ok: true };
+    },
+    [canManageKeys, refreshApiKeys],
+  );
+
   const deleteAccount = useCallback(async (): Promise<AuthResult> => {
     if (!currentUser) return { ok: false, error: "Not signed in." };
     try {
@@ -508,6 +570,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAdminAccess,
       deleteAdmin,
       refreshAdmins,
+      apiKeys,
+      createApiKey,
+      revokeApiKey,
+      refreshApiKeys,
       deleteAccount,
       logout,
       resendVerificationEmail,
@@ -521,7 +587,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentUser, currentOwner, isEmailVerified, loading, staffAccounts, adminAccounts,
       login, loginStaff, loginWithGoogle, loginStaffWithGoogle, signup, createStaff,
       updateStaffPin, setStaffAccess, deleteStaff, createAdmin, setAdminAccess, deleteAdmin,
-      refreshAdmins, deleteAccount, logout,
+      refreshAdmins, apiKeys, createApiKey, revokeApiKey, refreshApiKeys,
+      deleteAccount, logout,
       resendVerificationEmail, isSlugAvailable, updateProfileInfo,
       updatePassword, resetPassword, refreshProfile,
     ],

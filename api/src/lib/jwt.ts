@@ -4,10 +4,11 @@ import { env } from '../config.js';
 const accessSecret = new TextEncoder().encode(env.JWT_ACCESS_SECRET);
 
 export interface AccessClaims {
-  sub: string;
-  email: string;
-  role: 'owner' | 'staff' | 'admin';
+  sub: string; // for api keys: the api_keys.id
+  email: string; // for api keys: the key's name/label
+  role: 'owner' | 'staff' | 'admin' | 'api';
   ownerScopeId: string;
+  apiKeyId?: string; // present only for api principals
 }
 
 export const signAccessToken = (claims: AccessClaims): Promise<string> =>

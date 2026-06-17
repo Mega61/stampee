@@ -57,6 +57,7 @@ export const setupTestDb = async (): Promise<TestDb> => {
       // needed since we list every table; keeping the order tidy regardless.
       await pool.query(`
         truncate
+          loyalty.api_keys,
           loyalty.transactions,
           loyalty.issued_cards,
           loyalty.customers,

@@ -145,12 +145,21 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!card) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
 
-    // Look up the actor's display name from their profile.
-    const actor = await db
-      .selectFrom('profiles')
-      .select('business_name')
-      .where('id', '=', claims.sub)
-      .executeTakeFirst();
+    // Resolve the actor's display name. Human actors map to their profile; an
+    // API-key actor has no profile row, so attribute the activity to the key.
+    let actorId: string | null = claims.sub;
+    let actorName: string | null;
+    if (claims.role === 'api') {
+      actorId = null;
+      actorName = `API: ${claims.email}`;
+    } else {
+      const actor = await db
+        .selectFrom('profiles')
+        .select('business_name')
+        .where('id', '=', claims.sub)
+        .executeTakeFirst();
+      actorName = actor?.business_name ?? null;
+    }
 
     const id = body.id ?? randomUUID();
     await db
@@ -164,8 +173,8 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
         timestamp: body.timestamp,
         title: body.title,
         remarks: body.remarks ?? null,
-        actor_id: claims.sub,
-        actor_name: actor?.business_name ?? null,
+        actor_id: actorId,
+        actor_name: actorName,
         actor_role: claims.role,
       })
       .execute();

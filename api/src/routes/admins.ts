@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { ZodError } from 'zod';
 import { db } from '../db/kysely.js';
 import { AppError } from '../lib/errors.js';
-import { requireRole } from '../middleware/requireRole.js';
+import { requireHuman } from '../middleware/requireRole.js';
 import { CreateAdminBody, UpdateAdminAccessBody } from '../schemas/admins.js';
 
 const parse = <T>(schema: { parse: (input: unknown) => T }, input: unknown): T => {
@@ -60,7 +60,7 @@ const requireOwnedAdmin = async (adminId: string, ownerId: string): Promise<Prof
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   // GET /admins — list current owner's co-admins (owner only)
   app.get('/admins', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireHuman(req, 'owner');
     const rows = await db
       .selectFrom('profiles')
       .selectAll()
@@ -73,7 +73,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /admins { name, email } — invite a co-admin (owner only)
   app.post('/admins', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireHuman(req, 'owner');
     const body = parse(CreateAdminBody, req.body);
 
     // Email must be unique across loyalty.users.
@@ -123,7 +123,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /admins/:id/access { access } — enable/disable a co-admin (owner only)
   app.patch<{ Params: { id: string } }>('/admins/:id/access', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireHuman(req, 'owner');
     const body = parse(UpdateAdminAccessBody, req.body);
     const admin = await requireOwnedAdmin(req.params.id, claims.sub);
     await db.transaction().execute(async (tx) => {
@@ -151,7 +151,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /admins/:id (owner only)
   app.delete<{ Params: { id: string } }>('/admins/:id', async (req) => {
-    const claims = await requireRole(req, 'owner');
+    const claims = await requireHuman(req, 'owner');
     const admin = await requireOwnedAdmin(req.params.id, claims.sub);
     await db.deleteFrom('users').where('id', '=', admin.id).execute();
     return { ok: true, data: {} };

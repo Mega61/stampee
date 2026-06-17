@@ -97,6 +97,27 @@ export type AccessStatus = 'active' | 'disabled';
 // stays for legacy consumers; everyone is treated as fully unlocked.
 export type SubscriptionTier = 'free' | 'pro';
 
+// Bearer API key for external/system integrations. The plaintext secret
+// (`key`) is only ever present on the create response — see ApiKeyWithSecret.
+export type ApiKeyStatus = 'active' | 'revoked' | 'expired';
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  capabilities: string[];
+  status: ApiKeyStatus;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  revokedAt?: string;
+  createdAt?: string;
+}
+
+export interface ApiKeyWithSecret extends ApiKey {
+  /** Full plaintext secret — returned exactly once, on creation. */
+  key: string;
+}
+
 export interface User {
   id: string;
   businessName: string;

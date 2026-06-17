@@ -112,6 +112,20 @@ export interface TransactionsTable {
   actor_role: string | null;
 }
 
+export interface ApiKeysTable {
+  id: Generated<string>;
+  owner_id: string;
+  created_by: string | null;
+  name: string;
+  key_prefix: string;
+  token_hash: string;
+  capabilities: ColumnType<string[], string[] | undefined, string[]>;
+  last_used_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  expires_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  revoked_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   users: UsersTable;
   profiles: ProfilesTable;
@@ -122,4 +136,5 @@ export interface Database {
   customers: CustomersTable;
   issued_cards: IssuedCardsTable;
   transactions: TransactionsTable;
+  api_keys: ApiKeysTable;
 }

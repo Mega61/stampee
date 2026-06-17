@@ -7,6 +7,7 @@ import { ZodError } from 'zod';
 import { env } from './config.js';
 import { pool } from './db/pool.js';
 import { AppError } from './lib/errors.js';
+import { hashToken } from './lib/tokens.js';
 import { authPreHandler } from './middleware/auth.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
@@ -18,6 +19,7 @@ import { customerRoutes } from './routes/customers.js';
 import { cardRoutes } from './routes/cards.js';
 import { publicRoutes } from './routes/public.js';
 import { storageRoutes } from './routes/storage.js';
+import { apiKeyRoutes } from './routes/apiKeys.js';
 
 export const buildApp = async () => {
   const app = Fastify({
@@ -40,6 +42,15 @@ export const buildApp = async () => {
   await app.register(rateLimit, {
     max: 300,
     timeWindow: '1 minute',
+    // Rate-limit runs at onRequest, before authPreHandler populates req.user, so
+    // derive the bucket from the bearer token directly. API keys get their own
+    // per-key bucket (hashed, never the plaintext); everything else falls back
+    // to the client IP.
+    keyGenerator: (req) => {
+      const header = req.headers['authorization'];
+      const match = header ? /^Bearer\s+(stmp_[a-f0-9]+)$/i.exec(header) : null;
+      return match ? `apikey:${hashToken(match[1]!)}` : req.ip;
+    },
   });
 
   // Global optional auth: populates req.user from the access cookie when present.
@@ -86,6 +97,7 @@ export const buildApp = async () => {
   await app.register(cardRoutes);
   await app.register(publicRoutes);
   await app.register(storageRoutes);
+  await app.register(apiKeyRoutes);
 
   return app;
 };

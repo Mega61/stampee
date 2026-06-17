@@ -8,12 +8,29 @@ import { useAuth } from "./AuthProvider";
 import { buildStaffPortalUrl } from "../lib/links";
 import { useNavigate } from "react-router-dom";
 import { useSubscriptionContext } from "./SubscriptionContext";
+import type { ApiKey, ApiKeyWithSecret } from "../types";
 
 const DELETE_CONFIRMATION = "DELETE";
 
+const API_KEY_EXPIRY_OPTIONS: Array<{ label: string; days?: number }> = [
+  { label: "Sin vencimiento" },
+  { label: "30 días", days: 30 },
+  { label: "90 días", days: 90 },
+  { label: "1 año", days: 365 },
+];
+
+const formatDate = (iso?: string): string => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+};
+
+const apiKeyStatusVariant = (status: ApiKey["status"]): "secondary" | "destructive" | "outline" =>
+  status === "active" ? "secondary" : status === "expired" ? "outline" : "destructive";
+
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { staffAccounts, createStaff, updateStaffPin, setStaffAccess, deleteStaff, adminAccounts, createAdmin, setAdminAccess, deleteAdmin, isOwner, currentOwner, currentUser, deleteAccount, updateProfileInfo, updatePassword } = useAuth();
+  const { staffAccounts, createStaff, updateStaffPin, setStaffAccess, deleteStaff, adminAccounts, createAdmin, setAdminAccess, deleteAdmin, isOwner, isAdmin, currentOwner, currentUser, deleteAccount, updateProfileInfo, updatePassword, apiKeys, createApiKey, revokeApiKey } = useAuth();
   useSubscriptionContext();
 
   const [profileForm, setProfileForm] = useState({
@@ -60,6 +77,18 @@ export const SettingsPage: React.FC = () => {
   const [deleteAdminTarget, setDeleteAdminTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteAdminError, setDeleteAdminError] = useState("");
   const [deleteAdminBusy, setDeleteAdminBusy] = useState(false);
+
+  // --- API key ("Integraciones") section state ---------------------------
+  const canManageApiKeys = isOwner || isAdmin;
+  const [apiKeyForm, setApiKeyForm] = useState<{ name: string; expiryIndex: number }>({ name: "", expiryIndex: 0 });
+  const [apiKeyError, setApiKeyError] = useState("");
+  const [apiKeyBusy, setApiKeyBusy] = useState(false);
+  const [newApiKey, setNewApiKey] = useState<ApiKeyWithSecret | null>(null);
+  const [apiKeyCopied, setApiKeyCopied] = useState(false);
+  const [revokeApiKeyTarget, setRevokeApiKeyTarget] = useState<{ id: string; name: string } | null>(null);
+  const [revokeApiKeyError, setRevokeApiKeyError] = useState("");
+  const [revokeApiKeyBusy, setRevokeApiKeyBusy] = useState(false);
+
   const [isDeleteStepOneOpen, setIsDeleteStepOneOpen] = useState(false);
   const [isDeleteStepTwoOpen, setIsDeleteStepTwoOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -210,6 +239,51 @@ export const SettingsPage: React.FC = () => {
       return;
     }
     setDeleteAdminTarget(null);
+  };
+
+  const handleCreateApiKey = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setApiKeyError("");
+    if (!apiKeyForm.name.trim()) {
+      setApiKeyError("Ponle un nombre a la clave para identificarla.");
+      return;
+    }
+    setApiKeyBusy(true);
+    const result = await createApiKey({
+      name: apiKeyForm.name,
+      expiresInDays: API_KEY_EXPIRY_OPTIONS[apiKeyForm.expiryIndex]?.days,
+    });
+    setApiKeyBusy(false);
+    if (!result.ok) {
+      setApiKeyError(result.error);
+      return;
+    }
+    setApiKeyForm({ name: "", expiryIndex: 0 });
+    setApiKeyCopied(false);
+    setNewApiKey(result.apiKey);
+  };
+
+  const handleCopyApiKey = async () => {
+    if (!newApiKey) return;
+    try {
+      await navigator.clipboard.writeText(newApiKey.key);
+      setApiKeyCopied(true);
+    } catch {
+      setApiKeyCopied(false);
+    }
+  };
+
+  const handleRevokeApiKey = async () => {
+    if (!revokeApiKeyTarget) return;
+    setRevokeApiKeyError("");
+    setRevokeApiKeyBusy(true);
+    const result = await revokeApiKey(revokeApiKeyTarget.id);
+    setRevokeApiKeyBusy(false);
+    if (!result.ok) {
+      setRevokeApiKeyError(result.error);
+      return;
+    }
+    setRevokeApiKeyTarget(null);
   };
 
   return (
@@ -709,6 +783,142 @@ export const SettingsPage: React.FC = () => {
         </section>
       )}
 
+      {canManageApiKeys && (
+        <section className="rounded-2xl md:rounded-3xl border bg-white p-4 md:p-6 shadow-sm space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-lg md:text-xl font-semibold">API e integraciones</h2>
+              <p className="text-sm text-muted-foreground">
+                Genera claves para que sistemas externos consulten y actualicen tus datos vía la API. Cada clave tiene acceso de lectura y escritura a tu negocio.
+              </p>
+            </div>
+          </div>
+
+          <form className="space-y-3" onSubmit={handleCreateApiKey}>
+            <div className="grid gap-3 sm:grid-cols-[1.6fr_1fr]">
+              <div className="space-y-1.5">
+                <Label>Nombre</Label>
+                <Input
+                  value={apiKeyForm.name}
+                  onChange={(event) => setApiKeyForm({ ...apiKeyForm, name: event.target.value })}
+                  placeholder="Sistema de facturación"
+                  maxLength={80}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Vencimiento</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  value={apiKeyForm.expiryIndex}
+                  onChange={(event) => setApiKeyForm({ ...apiKeyForm, expiryIndex: Number(event.target.value) })}
+                >
+                  {API_KEY_EXPIRY_OPTIONS.map((opt, index) => (
+                    <option key={opt.label} value={index}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <Button type="submit" className="rounded-full h-10 px-6 w-full sm:w-auto" disabled={apiKeyBusy}>
+              {apiKeyBusy ? "Generando..." : "Generar clave"}
+            </Button>
+          </form>
+
+          {apiKeyError && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {apiKeyError}
+            </div>
+          )}
+
+          {/* API keys table — desktop */}
+          <div className="hidden md:block rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="grid grid-cols-[1.4fr_1.3fr_0.8fr_1fr_auto] gap-4 px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground bg-slate-50">
+              <span>Nombre</span>
+              <span>Clave</span>
+              <span>Estado</span>
+              <span>Último uso</span>
+              <span className="text-right">Acciones</span>
+            </div>
+            {apiKeys.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-muted-foreground">
+                Aún no hay claves. Genera la primera arriba.
+              </div>
+            ) : (
+              apiKeys.map((key) => (
+                <div
+                  key={key.id}
+                  className="grid grid-cols-[1.4fr_1.3fr_0.8fr_1fr_auto] gap-4 px-4 py-4 border-t items-center"
+                >
+                  <div className="font-medium text-foreground truncate">{key.name}</div>
+                  <div className="text-sm text-muted-foreground font-mono truncate">{key.keyPrefix}…</div>
+                  <div>
+                    <Badge variant={apiKeyStatusVariant(key.status)} className="uppercase tracking-wider">
+                      {key.status}
+                    </Badge>
+                  </div>
+                  <div className="text-sm text-muted-foreground">{formatDate(key.lastUsedAt)}</div>
+                  <div className="flex items-center justify-end gap-2">
+                    {key.status === "active" ? (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          setRevokeApiKeyTarget({ id: key.id, name: key.name });
+                          setRevokeApiKeyError("");
+                        }}
+                      >
+                        Revocar
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* API keys list — mobile cards */}
+          <div className="md:hidden space-y-3">
+            {apiKeys.length === 0 ? (
+              <div className="rounded-2xl border border-slate-100 px-4 py-6 text-sm text-muted-foreground">
+                Aún no hay claves. Genera la primera arriba.
+              </div>
+            ) : (
+              apiKeys.map((key) => (
+                <div key={key.id} className="rounded-2xl border border-slate-100 bg-slate-50/50 px-4 py-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground truncate">{key.name}</div>
+                      <div className="text-sm text-muted-foreground font-mono truncate">{key.keyPrefix}…</div>
+                      <div className="text-xs text-muted-foreground mt-1">Último uso: {formatDate(key.lastUsedAt)}</div>
+                    </div>
+                    <Badge variant={apiKeyStatusVariant(key.status)} className="uppercase tracking-wider shrink-0">
+                      {key.status}
+                    </Badge>
+                  </div>
+                  {key.status === "active" && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => {
+                        setRevokeApiKeyTarget({ id: key.id, name: key.name });
+                        setRevokeApiKeyError("");
+                      }}
+                    >
+                      Revocar
+                    </Button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="rounded-2xl md:rounded-3xl border border-rose-200 bg-rose-50 p-4 md:p-6 shadow-sm space-y-4">
         <div className="space-y-1">
           <h2 className="text-lg md:text-xl font-semibold text-rose-900">Danger Zone</h2>
@@ -805,6 +1015,54 @@ export const SettingsPage: React.FC = () => {
             </Button>
             <Button variant="destructive" onClick={handleDeleteAdmin} disabled={deleteAdminBusy}>
               {deleteAdminBusy ? "Eliminando..." : "Eliminar administrador"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Newly-minted API key — the secret is shown here exactly once. */}
+      <Dialog open={!!newApiKey} onOpenChange={(open) => !open && setNewApiKey(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Tu nueva clave API</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Copia esta clave ahora. <span className="font-semibold text-foreground">No volverá a mostrarse.</span> Guárdala en un lugar seguro.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input readOnly value={newApiKey?.key ?? ""} className="font-mono text-sm" />
+              <Button type="button" variant="outline" onClick={handleCopyApiKey}>
+                {apiKeyCopied ? "Copiado" : "Copiar"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Úsala en el encabezado: <span className="font-mono">Authorization: Bearer {newApiKey?.keyPrefix}…</span>
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setNewApiKey(null)}>Listo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!revokeApiKeyTarget} onOpenChange={(open) => !open && setRevokeApiKeyTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Revocar clave API?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              La clave <span className="font-semibold text-foreground">{revokeApiKeyTarget?.name}</span> dejará de funcionar de inmediato. Esta acción no se puede deshacer.
+            </p>
+            {revokeApiKeyError && <div className="text-sm text-rose-600">{revokeApiKeyError}</div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeApiKeyTarget(null)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleRevokeApiKey} disabled={revokeApiKeyBusy}>
+              {revokeApiKeyBusy ? "Revocando..." : "Revocar clave"}
             </Button>
           </DialogFooter>
         </DialogContent>

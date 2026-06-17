@@ -19,7 +19,7 @@ import {
   domainAllowed,
   type GoogleIdentity,
 } from '../lib/googleVerifier.js';
-import { requireUser } from '../middleware/requireUser.js';
+import { requireHuman } from '../middleware/requireRole.js';
 import { email } from '../email/index.js';
 import { verifyTemplate } from '../email/templates/verify.js';
 import { resetTemplate } from '../email/templates/reset.js';
@@ -643,7 +643,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /auth/me — returns { user, owner, staffAccounts }
   app.get('/auth/me', async (req, _reply) => {
-    const claims = await requireUser(req);
+    const claims = await requireHuman(req);
     const profile = await loadProfile(claims.sub);
     if (!profile) throw new AppError(401, 'UNAUTHENTICATED', 'Account not found.');
     if (profile.access === 'disabled') {
@@ -726,7 +726,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /auth/password — change password while logged in.
   app.post('/auth/password', async (req, reply) => {
-    const claims = await requireUser(req);
+    const claims = await requireHuman(req);
     const body = parse(ChangePasswordBody, req.body);
     const passwordHash = await hashPassword(body.newPassword);
     await db.transaction().execute(async (tx) => {
@@ -756,7 +756,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /auth/account
   app.delete('/auth/account', async (req, reply) => {
-    const claims = await requireUser(req);
+    const claims = await requireHuman(req);
     if (claims.role === 'owner') {
       await db.transaction().execute(async (tx) => {
         const members = await tx
