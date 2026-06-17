@@ -6,7 +6,7 @@ import { Search, Mail, Phone, Edit, UserPlus } from "lucide-react";
 import { Customer } from '../types';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Label } from "./ui/label";
-import { upsertCustomer } from '../lib/db/customers';
+import { upsertCustomer, updateCustomer } from '../lib/db/customers';
 import { useAuth } from './AuthProvider';
 
 interface CustomerDirectoryProps {
@@ -34,10 +34,12 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({ customers,
     if (!editingCustomer || !currentOwner) return;
     setError("");
     setBusy(true);
-    const result = await upsertCustomer(
-      { id: editingCustomer.id, name: formData.name, email: formData.email, mobile: formData.mobile, status: editingCustomer.status },
-      currentOwner.id
-    );
+    const result = await updateCustomer(editingCustomer.id, {
+      name: formData.name,
+      email: formData.email,
+      mobile: formData.mobile,
+      status: editingCustomer.status,
+    });
     setBusy(false);
     if (result.ok) {
       if (refreshData) {

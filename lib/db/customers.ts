@@ -26,6 +26,20 @@ export async function upsertCustomer(
   }
 }
 
+export async function updateCustomer(
+  customerId: string,
+  fields: { name?: string; email?: string; mobile?: string; status?: 'Active' | 'Inactive' },
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await api.patch(`/customers/${customerId}`, fields);
+    return { ok: true };
+  } catch (err) {
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to update this customer right now. Please try again.';
+    return { ok: false, error: message };
+  }
+}
+
 export async function updateCustomerStatus(
   customerId: string,
   status: 'Active' | 'Inactive',
