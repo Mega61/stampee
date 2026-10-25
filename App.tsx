@@ -1,5 +1,4 @@
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { Analytics } from '@vercel/analytics/react';
 import { Sidebar, NAV_ITEMS, SidebarContent } from './components/Sidebar';
 import { Template, Customer, IssuedCard } from './types';
 import { templates } from './data/templates';
@@ -16,22 +15,6 @@ import { fetchCustomersWithCards } from './lib/db/customers';
 import { fetchPublicScanEntryContext } from './lib/db/issuedCards';
 import { buildIssuedCardsKioskUrl, buildStaffPortalUrl, buildStaffScanEntryUrl } from './lib/links';
 import { api } from './lib/api';
-import { useSubscription } from './lib/useSubscription';
-import { SubscriptionProvider } from './components/SubscriptionContext';
-import { APP_ORIGIN } from './lib/siteConfig';
-
-const SITE_ORIGIN = APP_ORIGIN;
-const DEFAULT_SOCIAL_DESCRIPTION = 'Stampee is a digital loyalty card platform for small businesses, including loyalty program for cafes, loyalty program for spa, loyalty program for laundry, loyalty program for carwash, and loyalty program for salons.';
-const DEFAULT_OG_IMAGE = `${SITE_ORIGIN}/social-preview-v2.jpg`;
-
-type SeoConfig = {
-  title: string;
-  description: string;
-  socialDescription?: string;
-  canonical: string;
-  robots: string;
-  type?: 'website' | 'article';
-};
 
 const normalizeHexColor = (value: string) => {
   const normalized = value.replace('#', '').trim();
@@ -95,72 +78,15 @@ const withSuspense = (node: React.ReactNode) => (
   </Suspense>
 );
 
-const setMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
-  let tag = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
-  if (!tag) {
-    tag = document.createElement('meta');
-    tag.setAttribute(attribute, key);
-    document.head.appendChild(tag);
-  }
-  tag.setAttribute('content', content);
-};
+const DEFAULT_TITLE = 'Golden Beauty Studio · Fidelización';
 
-const setCanonicalLink = (href: string) => {
-  let link = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
-  if (!link) {
-    link = document.createElement('link');
-    link.setAttribute('rel', 'canonical');
-    document.head.appendChild(link);
-  }
-  link.setAttribute('href', href);
-};
-
-const getSeoForPathname = (pathname: string): SeoConfig => {
-  const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
-  const canonical = `${SITE_ORIGIN}${normalizedPath}`;
-  const defaultSeo: SeoConfig = {
-    title: 'Stampee | Digital Loyalty Cards',
-    description: DEFAULT_SOCIAL_DESCRIPTION,
-    socialDescription: DEFAULT_SOCIAL_DESCRIPTION,
-    canonical,
-    robots: 'noindex,nofollow',
-    type: 'website',
-  };
-
-  return defaultSeo;
-};
-
-const SeoManager: React.FC = () => {
+// Internal tool: no SEO. Just keep the tab title in sync with the section.
+const TitleManager: React.FC = () => {
   const location = useLocation();
 
   useEffect(() => {
-    const seo = getSeoForPathname(location.pathname);
-    const socialDescription = seo.socialDescription ?? seo.description;
-
-    document.title = seo.title;
-    setCanonicalLink(seo.canonical);
-    setMetaTag('name', 'description', seo.description);
-    setMetaTag('name', 'robots', seo.robots);
-    setMetaTag('property', 'og:locale', 'en_US');
-    setMetaTag('property', 'og:type', seo.type ?? 'website');
-    setMetaTag('property', 'og:site_name', 'Stampee');
-    setMetaTag('property', 'og:title', seo.title);
-    setMetaTag('property', 'og:description', socialDescription);
-    setMetaTag('property', 'og:url', seo.canonical);
-    setMetaTag('property', 'og:image', DEFAULT_OG_IMAGE);
-    setMetaTag('property', 'og:image:url', DEFAULT_OG_IMAGE);
-    setMetaTag('property', 'og:image:secure_url', DEFAULT_OG_IMAGE);
-    setMetaTag('property', 'og:image:type', 'image/jpeg');
-    setMetaTag('property', 'og:image:width', '1536');
-    setMetaTag('property', 'og:image:height', '1024');
-    setMetaTag('property', 'og:image:alt', 'Stampee digital loyalty card preview');
-    setMetaTag('name', 'twitter:card', 'summary_large_image');
-    setMetaTag('name', 'twitter:title', seo.title);
-    setMetaTag('name', 'twitter:description', socialDescription);
-    setMetaTag('name', 'twitter:url', seo.canonical);
-    setMetaTag('name', 'twitter:image', DEFAULT_OG_IMAGE);
-    setMetaTag('name', 'twitter:image:src', DEFAULT_OG_IMAGE);
-    setMetaTag('name', 'twitter:image:alt', 'Stampee digital loyalty card preview');
+    const section = NAV_ITEMS.find((item) => item.path === location.pathname)?.label;
+    document.title = section ? `${section} · Golden Beauty Studio` : DEFAULT_TITLE;
   }, [location.pathname]);
 
   return null;
@@ -470,7 +396,7 @@ const DashboardLayout: React.FC = () => {
       <Sidebar
         onScanQr={() => window.dispatchEvent(new Event('open-qr-scan'))}
       />
-      <main className="relative flex min-h-screen flex-1 flex-col overflow-visible md:h-screen md:overflow-hidden">
+      <main className="relative flex min-h-screen min-w-0 flex-1 flex-col overflow-visible md:h-screen md:overflow-hidden">
         <div className="md:hidden sticky top-0 z-40 flex items-center justify-between border-b border-border/80 bg-card/95 px-4 py-3 backdrop-blur-sm">
           <button
             className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border/80 bg-background shadow-subtle"
@@ -538,8 +464,6 @@ const AppRoutes: React.FC = () => {
   const [createdCards, setCreatedCards] = useState<Template[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dataReady, setDataReady] = useState(false);
-
-  const sub = useSubscription(createdCards, customers);
 
   const loadData = useCallback(async (ownerId: string) => {
     setDataReady(false);
@@ -609,8 +533,7 @@ const AppRoutes: React.FC = () => {
   };
 
   return (
-    <SubscriptionProvider value={sub}>
-      <Routes>
+    <Routes>
         {/* Public Routes */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/:slug/staff" element={withSuspense(<StaffLoginPage />)} />
@@ -676,7 +599,6 @@ const AppRoutes: React.FC = () => {
 
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
-    </SubscriptionProvider>
   );
 };
 
@@ -684,8 +606,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <SeoManager />
-        <Analytics />
+        <TitleManager />
         <AppRoutes />
       </BrowserRouter>
     </AuthProvider>

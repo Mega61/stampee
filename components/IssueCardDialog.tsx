@@ -194,7 +194,7 @@ export const IssueCardDialog: React.FC<IssueCardDialogProps> = ({
                                             </div>
                                             <div>
                                                 <p className="font-semibold text-sm">{c.name}</p>
-                                                <p className="text-xs text-muted-foreground">{c.totalStamps} stamps {c.isEnabled === false ? '• Disabled' : ''}</p>
+                                                <p className="text-xs text-muted-foreground">{c.totalStamps} stamps{(c.bonusStamps ?? 0) > 0 ? ` • ${c.bonusStamps} gifted` : ''} {c.isEnabled === false ? '• Disabled' : ''}</p>
                                             </div>
                                         </div>
                                         <ChevronRight size={16} className={`text-muted-foreground transition-opacity ${c.isEnabled === false ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`}/>

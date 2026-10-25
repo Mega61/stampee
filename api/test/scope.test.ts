@@ -183,9 +183,12 @@ describe('scope: anonymous + tampered cookies', () => {
   it('tampered access cookie (signature break) → 401', async () => {
     const t = await setupTenantA();
     const access = t.ownerSession.get('access')!;
-    // Flip a character in the signature segment.
+    // Flip the FIRST signature character: the last base64url char of a
+    // 32-byte HMAC carries padding bits, so flipping it can decode to the same
+    // signature and make this test flaky.
     const parts = access.split('.');
-    const tampered = `${parts[0]}.${parts[1]}.${parts[2]!.slice(0, -1)}${parts[2]!.endsWith('A') ? 'B' : 'A'}`;
+    const sig = parts[2]!;
+    const tampered = `${parts[0]}.${parts[1]}.${sig.startsWith('A') ? 'B' : 'A'}${sig.slice(1)}`;
     const res = await rig.app.inject({
       method: 'GET',
       url: '/auth/me',

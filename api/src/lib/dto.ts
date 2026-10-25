@@ -17,6 +17,7 @@ export type CampaignRow = {
   icon_key: string;
   colors: Record<string, string>;
   total_stamps: number;
+  bonus_stamps: number | null;
   social: Record<string, unknown> | null;
   created_at: Date | string;
 };
@@ -36,6 +37,7 @@ export const toCampaignDto = (r: CampaignRow) => ({
   iconKey: r.icon_key,
   colors: r.colors,
   totalStamps: r.total_stamps,
+  bonusStamps: r.bonus_stamps ?? 0,
   social: r.social ?? undefined,
 });
 

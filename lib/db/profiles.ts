@@ -56,8 +56,6 @@ export async function updateProfile(
     slug?: string;
     status?: string;
     access?: string;
-    tier?: string;
-    tier_expires_at?: string | null;
   },
 ): Promise<{ ok: boolean; error?: string }> {
   // The legacy callers still pass snake_case for staff access toggles.
@@ -66,7 +64,7 @@ export async function updateProfile(
   if (updates.business_name !== undefined) body['businessName'] = updates.business_name;
   if (updates.email !== undefined) body['email'] = updates.email;
   if (updates.slug !== undefined) body['slug'] = updates.slug;
-  // status / access / tier on a staff profile go through different endpoints —
+  // status / access on a staff profile go through different endpoints —
   // AuthProvider routes those through dedicated calls.
   try {
     if ('access' in updates && updates.access !== undefined) {

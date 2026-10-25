@@ -69,6 +69,7 @@ export interface CampaignsTable {
   icon_key: ColumnType<string, string | undefined, string>;
   colors: Record<string, string>;
   total_stamps: ColumnType<number, number | undefined, number>;
+  bonus_stamps: ColumnType<number, number | undefined, number>;
   social: Record<string, unknown> | null;
   created_at: Generated<Date>;
 }

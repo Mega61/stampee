@@ -40,7 +40,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
 
     const campaign = await db
       .selectFrom('campaigns')
-      .select(['id', 'name'])
+      .select(['id', 'name', 'bonus_stamps'])
       .where('id', '=', body.campaignId)
       .where('owner_id', '=', claims.ownerScopeId)
       .executeTakeFirst();
@@ -49,6 +49,12 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
     const id = body.id ?? randomUUID();
     const uniqueId = body.uniqueId ?? randomUUID();
     const today = new Date().toISOString().split('T')[0]!;
+    // Gift stamps come from the live campaign, not the client, so a stale or
+    // tampered snapshot can't pre-fill a card.
+    const bonusStamps = campaign.bonus_stamps;
+    const templateSnapshot = body.templateSnapshot
+      ? { ...body.templateSnapshot, bonusStamps }
+      : null;
 
     try {
       await db
@@ -60,10 +66,10 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
           campaign_id: body.campaignId,
           owner_id: claims.ownerScopeId,
           campaign_name: body.campaignName ?? campaign.name,
-          stamps: 0,
+          stamps: bonusStamps,
           last_visit: today,
           status: 'Active',
-          template_snapshot: body.templateSnapshot ?? null,
+          template_snapshot: templateSnapshot,
         })
         .execute();
     } catch (err: unknown) {

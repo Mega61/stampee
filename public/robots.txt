@@ -1,23 +1,2 @@
 User-agent: *
-Allow: /
-
-Disallow: /dashboard
-Disallow: /campaigns
-Disallow: /gallery
-Disallow: /analytics
-Disallow: /transactions
-Disallow: /settings
-Disallow: /issued-cards
-Disallow: /customers
-Disallow: /editor/
-Disallow: /preview/
-Disallow: /active/
-Disallow: /login
-Disallow: /signup
-Disallow: /forgot-password
-Disallow: /*/staff
-Disallow: /*/staff*
-Disallow: /*/scan/
-Disallow: /*/scan/*
-
-Sitemap: https://stampee.co/sitemap.xml
+Disallow: /

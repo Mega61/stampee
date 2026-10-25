@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Template } from '../types';
 import { Button } from './ui/button';
-import { PlusCircle, Edit2, Trash2, CreditCard, Play, QrCode, Power, Copy, ExternalLink } from 'lucide-react';
+import { Gift, PlusCircle, Edit2, Trash2, CreditCard, Play, QrCode, Power, Copy, ExternalLink } from 'lucide-react';
 import { LoyaltyCard } from './LoyaltyCard';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -15,7 +15,6 @@ import {
 import { QrCodeDisplay } from './ui/qr-code-display';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { useSubscriptionContext } from './SubscriptionContext';
 import { buildCampaignSignupUrl } from '../lib/links';
 import { useAuth } from './AuthProvider';
 
@@ -109,6 +108,14 @@ const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({
                     <p className="text-sm text-muted-foreground truncate" title={card.rewardName}>
                        Reward: {card.rewardName}
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                       {card.totalStamps} stamps
+                       {(card.bonusStamps ?? 0) > 0 && (
+                         <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">
+                           <Gift size={11} /> {card.bonusStamps} gifted · {card.totalStamps - (card.bonusStamps ?? 0)} visits
+                         </span>
+                       )}
+                    </p>
                 </div>
                 
                 <div className="flex items-center justify-center gap-3">
@@ -177,7 +184,6 @@ export const MyCards: React.FC<MyCardsProps> = ({
   const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  useSubscriptionContext();
   const qrUrl = qrCard && currentOwner?.slug ? buildCampaignSignupUrl(currentOwner.slug, qrCard.id) : "";
   const qrDisplayUrl = qrUrl.length > 42 ? `${qrUrl.slice(0, 42)}...` : qrUrl;
 

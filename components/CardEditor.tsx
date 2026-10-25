@@ -8,7 +8,7 @@ import { Switch } from './ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
-import { ArrowLeft, Check as CheckIcon, Smartphone, Image as ImageIcon, Type, Palette, Grid, X, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Check as CheckIcon, Smartphone, Image as ImageIcon, Type, Palette, Grid, X, ChevronDown, Gift } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ICON_OPTIONS } from '../lib/iconRegistry';
 import { useAuth } from './AuthProvider';
@@ -401,12 +401,26 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
 
   const handleStampsChange = (value: number) => {
     if (!Number.isNaN(value)) {
+        setTemplate(prev => {
+            const totalStamps = Math.min(Math.max(value, 3), 16);
+            // Always leave at least one stamp for the customer to earn.
+            const bonusStamps = Math.min(prev.bonusStamps ?? 0, totalStamps - 1);
+            return { ...prev, totalStamps, bonusStamps };
+        });
+    }
+  };
+
+  const handleBonusStampsChange = (value: number) => {
+    if (!Number.isNaN(value)) {
         setTemplate(prev => ({
             ...prev,
-            totalStamps: Math.min(Math.max(value, 3), 16)
+            bonusStamps: Math.min(Math.max(value, 0), prev.totalStamps - 1)
         }));
     }
   };
+
+  const bonusStamps = template.bonusStamps ?? 0;
+  const visitsRequired = template.totalStamps - bonusStamps;
 
   const updateColors = (
     type: 'background' | 'text' | 'stampInactiveBg' | 'stampInactiveIcon' | 'stampActiveBg' | 'stampActiveIcon', 
@@ -792,6 +806,32 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
                                 <span>3</span>
                                 <span>16</span>
                             </div>
+                        </div>
+                        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <Label htmlFor="bonusStamps" className="flex items-center gap-2">
+                                    <Gift size={14} className="text-amber-600" /> Gift Stamps
+                                </Label>
+                                <span className="inline-flex min-w-12 items-center justify-center rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
+                                    {bonusStamps}
+                                </span>
+                            </div>
+                            <input
+                                id="bonusStamps"
+                                type="range"
+                                min={0}
+                                max={template.totalStamps - 1}
+                                step={1}
+                                value={bonusStamps}
+                                onChange={(e) => handleBonusStampsChange(parseInt(e.target.value, 10))}
+                                className="h-2 w-full cursor-pointer appearance-none rounded-full bg-amber-200/70"
+                            />
+                            <p className="text-xs leading-5 text-amber-900/80">
+                                {bonusStamps === 0
+                                    ? "New cards start empty. Gift a few stamps so customers start with progress and feel closer to the reward."
+                                    : <>New cards show <strong>{template.totalStamps}</strong> slots with <strong>{bonusStamps}</strong> already stamped, so the customer needs <strong>{visitsRequired}</strong> {visitsRequired === 1 ? 'visit' : 'visits'} to earn the reward.</>}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">Only applies to cards issued after you save. Existing cards keep their design.</p>
                         </div>
                     </AccordionContent>
                 </AccordionItem>

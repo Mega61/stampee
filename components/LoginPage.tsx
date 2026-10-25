@@ -7,7 +7,6 @@ import { Input } from "./ui/input";
 import { useAuth } from "./AuthProvider";
 import type { AuthResult } from "./AuthProvider";
 import { GoogleSignInButton } from "./GoogleSignInButton";
-import { trackEvent } from "../lib/analytics";
 
 const inputCls =
   "h-14 rounded-[1.2rem] border border-black/[0.08] bg-[#f4f1ea] px-4 text-[15px] text-[#171512] shadow-none placeholder:text-[#8a8276] focus-visible:border-black/25 focus-visible:bg-white focus-visible:ring-0";
@@ -52,8 +51,6 @@ export const LoginPage: React.FC = () => {
       const result = await withTimeout<AuthResult>(login(email, password));
       if ("error" in result) {
         setError(result.error);
-      } else {
-        trackEvent("Login Success", { role: result.user?.role ?? "owner" });
       }
     } catch {
       setError("Unable to sign in right now. Please try again.");
@@ -70,8 +67,6 @@ export const LoginPage: React.FC = () => {
       const result = await withTimeout<AuthResult>(loginWithGoogle(credential));
       if (!result.ok) {
         setError(result.error);
-      } else {
-        trackEvent("Login Success", { role: result.user?.role ?? "owner", method: "google" });
       }
     } catch {
       setError("No se pudo iniciar sesión con Google. Inténtalo de nuevo.");

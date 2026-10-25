@@ -44,3 +44,9 @@ export function resolveHexAndOpacity(cls: string | undefined, fallback = '#00000
   const opacity = extractIntensity(cls) / 100;
   return { hex, opacity };
 }
+
+export const getBonusStamps = (template: { bonusStamps?: number; totalStamps: number }) =>
+  Math.min(Math.max(template.bonusStamps ?? 0, 0), Math.max(template.totalStamps - 1, 0));
+
+export const formatGiftRemark = (bonusStamps: number) =>
+  `${bonusStamps} ${bonusStamps === 1 ? 'sello de regalo' : 'sellos de regalo'}`;

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-type AuthMode = "login" | "signup" | "staff";
+type AuthMode = "login" | "staff";
 
 interface AuthSplitLayoutProps {
   title: string;
@@ -77,7 +77,7 @@ const MODE_CONFIG: Record<AuthMode, ThemeConfig> = {
     showcaseEyebrow: "Owner workspace",
     showcaseTitle: "Cards that live in the browser.",
     showcaseCopy: "Keep campaigns, issued cards, and return visits in one place without sending customers to an app store.",
-    showcaseSlug: "/stampee",
+    showcaseSlug: "/goldenbeauty",
     card: {
       eyebrow: "Repeat visits",
       title: "Launch, stamp, retain.",
@@ -98,46 +98,11 @@ const MODE_CONFIG: Record<AuthMode, ThemeConfig> = {
       className: "bg-[#edd9bf] text-[#473521] shadow-[0_28px_96px_-52px_rgba(60,31,7,0.48)]",
     },
     pills: [
-      { label: "/stampee", className: "bg-[#f4f1ec] text-[#1f1d19]", icon: Sparkles },
+      { label: "/goldenbeauty", className: "bg-[#f4f1ec] text-[#1f1d19]", icon: Sparkles },
       { label: "Owner dashboard", className: "bg-white/88 text-[#3c342a]", icon: WalletCards },
       { label: "Browser card", className: "bg-white/72 text-[#3c342a]", icon: QrCode },
     ],
     actions: [ChartNoAxesCombined, WalletCards, Sparkles],
-  },
-  signup: {
-    leftBg: "bg-[#f2efe8]",
-    rightBg: "bg-[#c79b2f]",
-    navLinkLabel: "Log in",
-    navLinkTo: "/login",
-    showcaseEyebrow: "Launch faster",
-    showcaseTitle: "Launch digital loyalty in minutes.",
-    showcaseCopy: "Claim your branded card link, set up the workspace, and start issuing loyalty cards without printing or app installs.",
-    showcaseSlug: "/yourbrand",
-    card: {
-      eyebrow: "Setup time",
-      title: "From signup to card link in one flow.",
-      copy: "Create the owner workspace, reserve the public URL, and be ready for customers the same day.",
-      list: ["Free to start", "Custom public URL", "No card printing"],
-      className: "bg-[linear-gradient(180deg,#c98a39_0%,#9d6325_100%)] text-white shadow-[0_38px_120px_-60px_rgba(57,29,6,0.65)]",
-    },
-    accent: {
-      title: "Custom public URL",
-      copy: "Reserve the branded link customers will save and revisit.",
-      className: "bg-[linear-gradient(180deg,#d92de1_0%,#bd21d5_100%)] text-white shadow-[0_26px_90px_-48px_rgba(133,9,151,0.65)]",
-      icon: QrCode,
-    },
-    utility: {
-      title: "Workspace ready",
-      value: "Same day",
-      rows: ["Owner setup", "Staff-ready portal", "Live launch status"],
-      className: "bg-[#efdbc2] text-[#473521] shadow-[0_28px_96px_-52px_rgba(60,31,7,0.48)]",
-    },
-    pills: [
-      { label: "/yourbrand", className: "bg-[#f4f1ec] text-[#1f1d19]", icon: Sparkles },
-      { label: "Free to start", className: "bg-white/88 text-[#3c342a]", icon: ArrowUpRight },
-      { label: "No downloads", className: "bg-white/72 text-[#3c342a]", icon: WalletCards },
-    ],
-    actions: [Sparkles, Building2, ChartNoAxesCombined],
   },
   staff: {
     leftBg: "bg-[#f4eee7]",

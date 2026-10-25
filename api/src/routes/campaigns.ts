@@ -24,6 +24,7 @@ const campaignValuesFromBody = (body: CampaignBody, ownerId: string, id: string)
   icon_key: body.iconKey,
   colors: body.colors,
   total_stamps: body.totalStamps,
+  bonus_stamps: body.bonusStamps ?? 0,
   social: body.social ?? null,
 });
 

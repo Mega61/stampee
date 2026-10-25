@@ -124,6 +124,12 @@ export const PublicCampaignSignupPage: React.FC = () => {
           <p className="mt-3 text-[0.98rem] leading-7 text-[#4f5258]">
             Únete a <span className="font-semibold text-[#1d1d1f]">{context.campaign.name}</span> para empezar a acumular sellos.
           </p>
+          {!disabled && (context.campaign.bonusStamps ?? 0) > 0 && (
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-900">
+              🎁 Al registrarte te regalamos {context.campaign.bonusStamps}{' '}
+              {context.campaign.bonusStamps === 1 ? 'sello' : 'sellos'} para que empieces con ventaja.
+            </div>
+          )}
 
           {disabled && (
             <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">

@@ -244,17 +244,17 @@ export const insertAdmin = async (
 export const insertCampaign = async (
   pool: TestDb['pool'],
   ownerId: string,
-  params: { id?: string; name: string; isEnabled?: boolean; totalStamps?: number },
+  params: { id?: string; name: string; isEnabled?: boolean; totalStamps?: number; bonusStamps?: number },
 ): Promise<string> => {
   const id = params.id ?? `campaign-${Math.random().toString(36).slice(2, 10)}`;
   await pool.query(
     `insert into loyalty.campaigns
        (id, owner_id, name, is_enabled, description, reward_name,
-        background_opacity, show_logo, icon_key, colors, total_stamps)
+        background_opacity, show_logo, icon_key, colors, total_stamps, bonus_stamps)
      values ($1, $2, $3, $4, '', '', 100, true, 'Coffee',
              '{"primary":"#000","secondary":"#fff","text":"#000","accent":"#888"}'::jsonb,
-             $5)`,
-    [id, ownerId, params.name, params.isEnabled ?? true, params.totalStamps ?? 10],
+             $5, $6)`,
+    [id, ownerId, params.name, params.isEnabled ?? true, params.totalStamps ?? 10, params.bonusStamps ?? 0],
   );
   return id;
 };

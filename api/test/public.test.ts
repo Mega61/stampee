@@ -125,6 +125,32 @@ describe('public: POST /public/signup outcome matrix', () => {
     expect(res.json().data.outcome).toBe('issued');
   });
 
+  it('gift campaign → signup card starts with the bonus stamps', async () => {
+    const campaignId = await insertCampaign(db.pool, owner.userId, {
+      name: 'Facial',
+      totalStamps: 10,
+      bonusStamps: 2,
+    });
+    const res = await rig.app.inject({
+      method: 'POST',
+      url: `/public/signup/${owner.slug}/${campaignId}`,
+      payload: { name: 'Gina', email: 'gina@x.com' },
+      headers: { 'content-type': 'application/json' },
+      // Own client IP so this doesn't eat the shared 5/min signup budget.
+      remoteAddress: '10.9.9.9',
+    });
+    expect(res.json().data.outcome).toBe('issued');
+    const uniqueId = res.json().data.uniqueId as string;
+
+    const card = await rig.app.inject({ method: 'GET', url: `/public/cards/${owner.slug}/${uniqueId}` });
+    const data = card.json().data;
+    expect(data.card.stamps).toBe(2);
+    expect(data.card.templateSnapshot.bonusStamps).toBe(2);
+    const issued = data.card.history.find((t: { type: string }) => t.type === 'issued');
+    expect(issued.amount).toBe(2);
+    expect(issued.remarks).toBe('2 sellos de regalo');
+  });
+
   it('same email second time → outcome:redirect_existing with the same uniqueId', async () => {
     const campaignId = await insertCampaign(db.pool, owner.userId, { name: 'Coffee' });
     const first = await rig.app.inject({

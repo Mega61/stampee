@@ -38,6 +38,9 @@ export interface Template {
   icon: IconComponent;
   colors: ThemeColors;
   totalStamps: number;
+  // Stamps pre-filled on every newly issued card ("gift" stamps). The customer
+  // still sees `totalStamps` slots but only needs totalStamps - bonusStamps visits.
+  bonusStamps?: number;
   social?: SocialLinks;
 }
 
@@ -93,9 +96,6 @@ export interface Customer {
 export type AccountStatus = 'unverified' | 'verified';
 export type UserRole = 'owner' | 'staff' | 'admin';
 export type AccessStatus = 'active' | 'disabled';
-// `tier` is dropped in the self-host fork (no monetization). The type alias
-// stays for legacy consumers; everyone is treated as fully unlocked.
-export type SubscriptionTier = 'free' | 'pro';
 
 // Bearer API key for external/system integrations. The plaintext secret
 // (`key`) is only ever present on the create response — see ApiKeyWithSecret.
@@ -127,8 +127,5 @@ export interface User {
   ownerId?: string | null;
   status: AccountStatus;
   access: AccessStatus;
-  // `tier` is optional and unused — kept here so legacy reads compile.
-  tier?: SubscriptionTier;
-  tierExpiresAt?: string;
   createdAt: string;
 }

@@ -1,10 +1,9 @@
 import React from 'react';
-import { LayoutDashboard, Users, CreditCard, Settings, LogOut, Wallet, History, QrCode, Crown, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, Settings, LogOut, Wallet, History, QrCode, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
-import { useSubscriptionContext } from './SubscriptionContext';
 
 interface SidebarProps {
   className?: string;
@@ -26,41 +25,6 @@ export const NAV_ITEMS = [
   { path: '/settings', label: 'Settings', icon: Settings, roles: ['owner'] },
 ];
 
-const PlanBadge: React.FC = () => {
-  const {
-    isProTier,
-    campaignCount,
-    campaignLimit,
-    issuedCardCount,
-    cardLimit,
-  } = useSubscriptionContext();
-  const { isStaff } = useAuth();
-  if (isStaff) return null;
-
-  if (isProTier) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 px-3 py-2 text-xs">
-        <Crown size={14} className="text-amber-500" />
-        <span className="font-semibold text-amber-700">Pro Plan</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 text-xs space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="font-semibold text-foreground">Beta Plan</span>
-        <Sparkles size={12} className="text-muted-foreground" />
-      </div>
-      <div className="flex items-center gap-3 text-muted-foreground">
-        <span>{campaignCount}/{campaignLimit === Infinity ? '∞' : campaignLimit} campaigns</span>
-        <span className="text-border">|</span>
-        <span>{issuedCardCount}/{cardLimit === Infinity ? '∞' : cardLimit} cards</span>
-      </div>
-    </div>
-  );
-};
-
 export const SidebarContent: React.FC<SidebarContentProps> = ({ onNavigate, onScanQr }) => {
   const navigate = useNavigate();
   const { currentUser, currentOwner, isStaff, logout } = useAuth();
@@ -72,7 +36,7 @@ export const SidebarContent: React.FC<SidebarContentProps> = ({ onNavigate, onSc
           <Link to="/" className="inline-flex items-center" onClick={onNavigate}>
             <img
               src="/stampee.svg"
-              alt="Stampee logo"
+              alt="Logo"
               className="h-12 w-auto"
             />
           </Link>
@@ -107,7 +71,6 @@ export const SidebarContent: React.FC<SidebarContentProps> = ({ onNavigate, onSc
         </div>
       </div>
       <div className="mt-auto px-4 pt-6 space-y-3">
-         <PlanBadge />
          {currentUser && (
           <div className="rounded-lg border border-border/80 bg-card px-3 py-3 text-xs text-muted-foreground shadow-subtle">
               <div className="font-semibold text-foreground">{currentUser.businessName}</div>

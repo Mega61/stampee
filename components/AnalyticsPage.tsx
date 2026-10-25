@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Area,
   AreaChart,
   Bar,
   BarChart,
-  Cell,
-  Pie,
-  PieChart,
+  CartesianGrid,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,20 +16,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { Customer, IssuedCard, Template, Transaction } from "../types";
-import { resolveCardTemplate } from "../lib/templateSerialization";
+import { Customer, Template } from "../types";
 import { cn } from "../lib/utils";
+import {
+  buildCardInsights,
+  buildWhatsAppUrl,
+  DAY_MS,
+  formatRelativeDays,
+  type CardInsight,
+} from "../lib/cardInsights";
 import {
   Activity,
   ArrowDownRight,
+  ArrowRight,
   ArrowUpRight,
   BadgeCheck,
   CalendarDays,
-  CreditCard,
+  Clock,
+  Gift,
+  MessageCircle,
   Minus,
-  Sparkles,
+  Repeat,
   Stamp,
-  TrendingUp,
+  UserPlus,
   Users,
 } from "lucide-react";
 
@@ -38,35 +47,34 @@ interface AnalyticsPageProps {
   campaigns: Template[];
 }
 
-type ActivityBucket = {
-  label: string;
-  stampAdds: number;
-  redemptions: number;
-};
-
-type CampaignStatsGroup = {
-  id: string;
-  name: string;
-  totalStamps: number | null;
-  issuedCards: IssuedCard[];
-  archived: boolean;
+type Visit = {
+  customerId: string;
+  cardId: string;
+  campaignKey: string;
+  timestamp: number;
+  amount: number;
+  actorName: string;
 };
 
 type RangeStats = {
-  stampAdds: number;
+  visits: number;
+  stamps: number;
+  visitingClients: number;
+  returningClients: number;
+  newCards: number;
   redemptions: number;
-  activeCustomers: number;
+  medianDaysBetweenVisits: number | null;
 };
 
-const DEFAULT_DAY_COUNT = 14;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_DAY_COUNT = 30;
+const AT_RISK_DAYS = 30;
+const LIST_LIMIT = 8;
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-
 const formatDecimal = (value: number) =>
   new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
-
 const formatPercent = (value: number) =>
   new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 
@@ -78,40 +86,34 @@ const toDateInputValue = (date: Date) => {
 };
 
 const parseDateInputToTimestamp = (value: string, endOfDay = false) => {
-  const [yearStr, monthStr, dayStr] = value.split("-");
-  const year = Number(yearStr);
-  const month = Number(monthStr);
-  const day = Number(dayStr);
+  const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return null;
-  const date = new Date(
-    year,
-    month - 1,
-    day,
-    endOfDay ? 23 : 0,
-    endOfDay ? 59 : 0,
-    endOfDay ? 59 : 0,
-    endOfDay ? 999 : 0
-  );
-  return date.getTime();
+  return endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
+    : new Date(year, month - 1, day).getTime();
 };
 
-const getDateKey = (date: Date) =>
-  `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+const getDateKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+const inRange = (ts: number, start: number, end: number) => ts >= start && ts <= end;
+const campaignKeyOf = (card: { campaignId: string | null; campaignName: string }) =>
+  card.campaignId ?? `archived:${card.campaignName}`;
 
-const isTimestampInRange = (timestamp: number | undefined, start: number, end: number) =>
-  typeof timestamp === "number" && timestamp >= start && timestamp <= end;
+const median = (values: number[]) => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+};
 
 const formatDateRangeLabel = (startDate: string, endDate: string) => {
   const start = parseDateInputToTimestamp(startDate);
   const end = parseDateInputToTimestamp(endDate);
   if (start === null || end === null) return "Custom range";
-  const startLabel = new Date(start).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const endLabel = new Date(end).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `${startLabel} – ${endLabel}`;
+  const fmt = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${fmt(start)} – ${fmt(end)}`;
 };
 
-// Resolve the live theme tokens so charts stay in lock-step with the design
-// system (and any future theme) instead of hardcoding hex values.
+// Resolve live theme tokens so charts track the design system.
 const useChartColors = () =>
   useMemo(() => {
     const fallback = {
@@ -132,37 +134,18 @@ const useChartColors = () =>
     };
   }, []);
 
-const computeRangeStats = (customers: Customer[], start: number, end: number): RangeStats => {
-  let stampAdds = 0;
-  let redemptions = 0;
-  const activeCustomers = new Set<string>();
-
-  customers.forEach((customer) => {
-    let hasActivity = false;
-    customer.cards.forEach((card) => {
-      (card.history || []).forEach((tx: Transaction) => {
-        if (!isTimestampInRange(tx.timestamp, start, end)) return;
-        hasActivity = true;
-        if (tx.type === "stamp_add") stampAdds += tx.amount || 1;
-        if (tx.type === "redeem") redemptions += 1;
-      });
-    });
-    if (hasActivity) activeCustomers.add(customer.id);
-  });
-
-  return { stampAdds, redemptions, activeCustomers: activeCustomers.size };
-};
-
-const describeDelta = (current: number, previous: number) => {
+const describeDelta = (current: number, previous: number, lowerIsBetter = false) => {
   if (previous === 0) {
-    if (current === 0) return { dir: "flat" as const, text: "No change" };
-    return { dir: "up" as const, text: "New activity" };
+    if (current === 0) return { dir: "flat" as const, text: "No change", good: true };
+    return { dir: "up" as const, text: "New", good: !lowerIsBetter };
   }
   const change = ((current - previous) / previous) * 100;
-  if (Math.abs(change) < 0.5) return { dir: "flat" as const, text: "No change" };
+  if (Math.abs(change) < 0.5) return { dir: "flat" as const, text: "No change", good: true };
+  const dir = change > 0 ? ("up" as const) : ("down" as const);
   return {
-    dir: change > 0 ? ("up" as const) : ("down" as const),
+    dir,
     text: `${change > 0 ? "+" : ""}${formatPercent(change)}% vs prev`,
+    good: lowerIsBetter ? dir === "down" : dir === "up",
   };
 };
 
@@ -171,7 +154,7 @@ const KpiCard: React.FC<{
   value: string;
   sub: string;
   icon: React.ElementType;
-  delta?: { dir: "up" | "down" | "flat"; text: string };
+  delta?: ReturnType<typeof describeDelta>;
 }> = ({ label, value, sub, icon: Icon, delta }) => {
   const DeltaIcon = delta?.dir === "up" ? ArrowUpRight : delta?.dir === "down" ? ArrowDownRight : Minus;
   return (
@@ -184,14 +167,16 @@ const KpiCard: React.FC<{
       </CardHeader>
       <CardContent>
         <div className="text-3xl font-semibold tracking-tight tabular-nums">{value}</div>
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {delta && (
             <span
               className={cn(
                 "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium",
-                delta.dir === "up" && "bg-foreground/10 text-foreground",
-                delta.dir === "down" && "bg-muted text-muted-foreground",
-                delta.dir === "flat" && "bg-muted text-muted-foreground"
+                delta.dir === "flat"
+                  ? "bg-muted text-muted-foreground"
+                  : delta.good
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-rose-50 text-rose-700"
               )}
             >
               <DeltaIcon className="h-3 w-3" />
@@ -209,15 +194,12 @@ const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border/80 bg-card px-3 py-2 text-xs shadow-md">
-      {label && <div className="mb-1.5 font-medium text-foreground">{label}</div>}
+      {label !== undefined && <div className="mb-1.5 font-medium text-foreground">{label}</div>}
       <div className="space-y-1">
         {payload.map((entry: any) => (
           <div key={entry.dataKey ?? entry.name} className="flex items-center justify-between gap-6">
             <span className="flex items-center gap-1.5 text-muted-foreground">
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ background: entry.color || entry.payload?.fill }}
-              />
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: entry.color || entry.payload?.fill }} />
               {entry.name}
             </span>
             <span className="font-medium tabular-nums text-foreground">{formatNumber(entry.value)}</span>
@@ -228,25 +210,84 @@ const ChartTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-const EmptyState: React.FC<{ rangeLabel: string }> = ({ rangeLabel }) => (
-  <Card className="border-dashed border-border bg-card/60 shadow-none">
-    <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Activity className="h-6 w-6 text-muted-foreground" />
-      </span>
-      <div className="space-y-1">
-        <h3 className="text-base font-semibold text-foreground">No activity in this range</h3>
-        <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-          Nothing was stamped or redeemed between {rangeLabel}. Try a wider window, or issue a card to
-          start collecting data.
-        </p>
-      </div>
-    </CardContent>
-  </Card>
+const SectionTitle: React.FC<{ title: string; sub: string; action?: React.ReactNode }> = ({ title, sub, action }) => (
+  <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-2">
+    <div className="space-y-1">
+      <CardTitle className="text-lg">{title}</CardTitle>
+      <p className="text-sm text-muted-foreground">{sub}</p>
+    </div>
+    {action}
+  </CardHeader>
 );
+
+const nudgeText = (row: CardInsight) => {
+  const firstName = row.customer.name.split(" ")[0] ?? "";
+  if (row.stage === "ready") {
+    return `¡Hola ${firstName}! Ya completaste tu tarjeta ${row.card.campaignName}. Tu ${row.template.rewardName} te espera en Golden Beauty Studio.`;
+  }
+  if (row.remaining <= 2) {
+    return `¡Hola ${firstName}! Te faltan solo ${row.remaining} ${row.remaining === 1 ? "sello" : "sellos"} para tu ${row.template.rewardName} en Golden Beauty Studio.`;
+  }
+  return `¡Hola ${firstName}! Te extrañamos en Golden Beauty Studio. Ya llevas ${row.card.stamps} de ${row.totalStamps} sellos para tu ${row.template.rewardName}.`;
+};
+
+const ActionList: React.FC<{
+  rows: CardInsight[];
+  empty: string;
+  detail: (row: CardInsight) => React.ReactNode;
+}> = ({ rows, empty, detail }) => {
+  if (rows.length === 0) {
+    return <p className="py-8 text-center text-sm text-muted-foreground">{empty}</p>;
+  }
+  return (
+    <ul className="divide-y divide-border/70">
+      {rows.map((row) => {
+        const whatsApp = buildWhatsAppUrl(row.customer.mobile, nudgeText(row));
+        return (
+          <li key={row.card.id} className="flex items-center justify-between gap-3 py-2.5">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{row.customer.name}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {row.card.campaignName} · {detail(row)}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <div className="flex w-20 gap-0.5" aria-hidden>
+                {Array.from({ length: row.totalStamps }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      "h-1.5 flex-1 rounded-full",
+                      i >= row.card.stamps ? "bg-muted" : i < row.bonusStamps ? "bg-amber-400" : "bg-foreground/80"
+                    )}
+                  />
+                ))}
+              </div>
+              {whatsApp ? (
+                <a
+                  href={whatsApp}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title="Send WhatsApp reminder"
+                  aria-label={`Send WhatsApp reminder to ${row.customer.name}`}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                </a>
+              ) : (
+                <span className="h-8 w-8" />
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
 
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaigns }) => {
   const colors = useChartColors();
+  const now = useMemo(() => Date.now(), []);
 
   const [startDate, setStartDate] = useState(() => {
     const start = new Date();
@@ -254,23 +295,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
     return toDateInputValue(start);
   });
   const [endDate, setEndDate] = useState(() => toDateInputValue(new Date()));
+  const [campaignFilter, setCampaignFilter] = useState("all");
 
   const { rangeStart, rangeEnd } = useMemo(() => {
-    const now = new Date();
-    const fallbackEnd = new Date(now);
+    const fallbackEnd = new Date();
     fallbackEnd.setHours(23, 59, 59, 999);
-    const fallbackStart = new Date(now);
+    const fallbackStart = new Date();
     fallbackStart.setDate(fallbackStart.getDate() - (DEFAULT_DAY_COUNT - 1));
     fallbackStart.setHours(0, 0, 0, 0);
-
     let nextStart = parseDateInputToTimestamp(startDate) ?? fallbackStart.getTime();
     let nextEnd = parseDateInputToTimestamp(endDate, true) ?? fallbackEnd.getTime();
-    if (nextStart > nextEnd) {
-      const swap = nextStart;
-      nextStart = nextEnd;
-      nextEnd = swap;
-    }
-
+    if (nextStart > nextEnd) [nextStart, nextEnd] = [nextEnd, nextStart];
     return { rangeStart: nextStart, rangeEnd: nextEnd };
   }, [startDate, endDate]);
 
@@ -282,263 +317,311 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
     setEndDate(toDateInputValue(end));
   };
 
-  const selectedDayCount = useMemo(() => {
-    const start = new Date(rangeStart);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(rangeEnd);
-    end.setHours(0, 0, 0, 0);
-    return Math.floor((end.getTime() - start.getTime()) / DAY_MS) + 1;
-  }, [rangeStart, rangeEnd]);
+  const selectedDayCount = Math.floor(
+    (new Date(rangeEnd).setHours(0, 0, 0, 0) - new Date(rangeStart).setHours(0, 0, 0, 0)) / DAY_MS
+  ) + 1;
+  const activePreset =
+    endDate === toDateInputValue(new Date()) && [7, 30, 90, 365].includes(selectedDayCount) ? selectedDayCount : null;
+  const rangeLabel = formatDateRangeLabel(startDate, endDate);
 
-  const activePreset = useMemo(() => {
-    const todayEnd = toDateInputValue(new Date());
-    if (endDate !== todayEnd) return null;
-    if ([7, 14, 30, 90].includes(selectedDayCount)) return selectedDayCount;
-    return null;
-  }, [endDate, selectedDayCount]);
+  // ---------- base data (campaign-filtered) ----------
+  const allInsights = useMemo(() => buildCardInsights(customers, campaigns, now), [customers, campaigns, now]);
+  const insights = useMemo(
+    () => (campaignFilter === "all" ? allInsights : allInsights.filter((r) => campaignKeyOf(r.card) === campaignFilter)),
+    [allInsights, campaignFilter]
+  );
 
-  const rangeLabel = useMemo(() => formatDateRangeLabel(startDate, endDate), [startDate, endDate]);
-  const allCards = useMemo(() => customers.flatMap((c) => c.cards), [customers]);
-  const filteredCards = useMemo(() => {
-    return allCards.filter((card) =>
-      (card.history || []).some((tx) => isTimestampInRange(tx.timestamp, rangeStart, rangeEnd))
-    );
-  }, [allCards, rangeStart, rangeEnd]);
+  const campaignOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    campaigns.forEach((c) => options.set(c.id, c.name));
+    allInsights.forEach(({ card }) => {
+      const key = campaignKeyOf(card);
+      if (!options.has(key)) options.set(key, `${card.campaignName} (archived)`);
+    });
+    return Array.from(options, ([id, name]) => ({ id, name }));
+  }, [campaigns, allInsights]);
 
-  // Current vs previous equal-length period for trend deltas.
-  const rangeStats = useMemo(() => computeRangeStats(customers, rangeStart, rangeEnd), [
-    customers,
-    rangeStart,
-    rangeEnd,
-  ]);
-  const previousStats = useMemo(() => {
-    const span = rangeEnd - rangeStart;
-    const prevEnd = rangeStart - 1;
-    const prevStart = prevEnd - span;
-    return computeRangeStats(customers, prevStart, prevEnd);
-  }, [customers, rangeStart, rangeEnd]);
+  const visits = useMemo<Visit[]>(
+    () =>
+      insights.flatMap(({ customer, card }) =>
+        (card.history ?? [])
+          .filter((tx) => tx.type === "stamp_add" && typeof tx.timestamp === "number")
+          .map((tx) => ({
+            customerId: customer.id,
+            cardId: card.id,
+            campaignKey: campaignKeyOf(card),
+            timestamp: tx.timestamp,
+            amount: tx.amount || 1,
+            actorName: tx.actorName || "Unknown",
+          }))
+      ),
+    [insights]
+  );
 
-  const totals = useMemo(() => {
-    const issued = filteredCards.length;
-    const active = filteredCards.filter((card) => card.status === "Active");
-    const redeemed = filteredCards.filter((card) => card.status === "Redeemed");
-    const redemptionRate = issued > 0 ? (redeemed.length / issued) * 100 : 0;
+  // Per customer: sorted distinct visit days, for cadence + returning metrics.
+  const visitDaysByCustomer = useMemo(() => {
+    const map = new Map<string, number[]>();
+    visits.forEach((v) => {
+      const day = new Date(v.timestamp).setHours(0, 0, 0, 0);
+      const list = map.get(v.customerId) ?? [];
+      list.push(day);
+      map.set(v.customerId, list);
+    });
+    map.forEach((list, key) => map.set(key, Array.from(new Set(list)).sort((a, b) => a - b)));
+    return map;
+  }, [visits]);
 
-    const avgStamps =
-      active.length > 0
-        ? active.reduce((sum, card) => sum + (card.stamps || 0), 0) / active.length
-        : 0;
+  const computeRangeStats = (start: number, end: number): RangeStats => {
+    let visitCount = 0;
+    let stamps = 0;
+    const clients = new Set<string>();
+    visits.forEach((v) => {
+      if (!inRange(v.timestamp, start, end)) return;
+      visitCount += 1;
+      stamps += v.amount;
+      clients.add(v.customerId);
+    });
 
-    const readyToRedeem = active.filter((card) => {
-      const template = resolveCardTemplate(card, campaigns);
-      if (!template) return false;
-      return card.stamps >= template.totalStamps;
-    }).length;
+    let returningClients = 0;
+    const gaps: number[] = [];
+    visitDaysByCustomer.forEach((days, customerId) => {
+      if (clients.has(customerId) && days[0]! < start) returningClients += 1;
+      for (let i = 1; i < days.length; i += 1) {
+        if (inRange(days[i]!, start, end)) gaps.push((days[i]! - days[i - 1]!) / DAY_MS);
+      }
+    });
+
+    let newCards = 0;
+    let redemptions = 0;
+    insights.forEach(({ card, issuedAt }) => {
+      if (issuedAt !== null && inRange(issuedAt, start, end)) newCards += 1;
+      (card.history ?? []).forEach((tx) => {
+        if (tx.type === "redeem" && inRange(tx.timestamp, start, end)) redemptions += 1;
+      });
+    });
 
     return {
-      issued,
-      active: active.length,
-      redeemed: redeemed.length,
-      redemptionRate,
-      avgStamps,
-      readyToRedeem,
+      visits: visitCount,
+      stamps,
+      visitingClients: clients.size,
+      returningClients,
+      newCards,
+      redemptions,
+      medianDaysBetweenVisits: median(gaps),
     };
-  }, [filteredCards, campaigns]);
+  };
 
-  const activityBuckets = useMemo(() => {
-    const start = new Date(rangeStart);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(rangeEnd);
-    end.setHours(0, 0, 0, 0);
-    const days: ActivityBucket[] = [];
+  const stats = useMemo(() => computeRangeStats(rangeStart, rangeEnd), [visits, visitDaysByCustomer, insights, rangeStart, rangeEnd]); // eslint-disable-line react-hooks/exhaustive-deps
+  const prevStats = useMemo(() => {
+    const span = rangeEnd - rangeStart;
+    return computeRangeStats(rangeStart - 1 - span, rangeStart - 1);
+  }, [visits, visitDaysByCustomer, insights, rangeStart, rangeEnd]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const daySpan = Math.max(0, Math.floor((end.getTime() - start.getTime()) / DAY_MS));
-    for (let i = 0; i <= daySpan; i += 1) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + i);
-      days.push({
-        label: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        stampAdds: 0,
+  const returningShare = stats.visitingClients > 0 ? (stats.returningClients / stats.visitingClients) * 100 : 0;
+  const prevReturningShare =
+    prevStats.visitingClients > 0 ? (prevStats.returningClients / prevStats.visitingClients) * 100 : 0;
+
+  // ---------- activity over time (weekly buckets for long ranges) ----------
+  const activitySeries = useMemo(() => {
+    const weekly = selectedDayCount > 45;
+    const buckets: { label: string; visits: number; redemptions: number; newCards: number }[] = [];
+    const index = new Map<string, (typeof buckets)[number]>();
+    const keyFor = (ts: number) => {
+      const d = new Date(ts);
+      d.setHours(0, 0, 0, 0);
+      if (weekly) d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Monday
+      return getDateKey(d);
+    };
+    const cursor = new Date(rangeStart);
+    cursor.setHours(0, 0, 0, 0);
+    if (weekly) cursor.setDate(cursor.getDate() - ((cursor.getDay() + 6) % 7));
+    while (cursor.getTime() <= rangeEnd) {
+      const bucket = {
+        label: cursor.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        visits: 0,
         redemptions: 0,
-      });
+        newCards: 0,
+      };
+      buckets.push(bucket);
+      index.set(getDateKey(cursor), bucket);
+      cursor.setDate(cursor.getDate() + (weekly ? 7 : 1));
     }
-
-    const bucketByKey = new Map<string, ActivityBucket>();
-    days.forEach((bucket, index) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + index);
-      bucketByKey.set(getDateKey(date), bucket);
-    });
-
-    allCards.forEach((card) => {
-      (card.history || []).forEach((tx: Transaction) => {
-        if (!isTimestampInRange(tx.timestamp, rangeStart, rangeEnd)) return;
-        const bucket = bucketByKey.get(getDateKey(new Date(tx.timestamp)));
-        if (!bucket) return;
-        if (tx.type === "stamp_add") bucket.stampAdds += tx.amount || 1;
-        if (tx.type === "redeem") bucket.redemptions += 1;
-      });
-    });
-
-    return days;
-  }, [allCards, rangeStart, rangeEnd]);
-
-  const hasActivity = useMemo(
-    () => activityBuckets.some((b) => b.stampAdds > 0 || b.redemptions > 0),
-    [activityBuckets]
-  );
-
-  const progressDistribution = useMemo(() => {
-    const buckets = { zero: 0, low: 0, mid: 0, full: 0 };
-    filteredCards
-      .filter((card) => card.status === "Active")
-      .forEach((card) => {
-        const template = resolveCardTemplate(card, campaigns);
-        if (!template || template.totalStamps === 0) return;
-        const ratio = card.stamps / template.totalStamps;
-        if (ratio <= 0) buckets.zero += 1;
-        else if (ratio < 0.5) buckets.low += 1;
-        else if (ratio < 1) buckets.mid += 1;
-        else buckets.full += 1;
-      });
-    return buckets;
-  }, [filteredCards, campaigns]);
-
-  const distributionData = useMemo(
-    () => [
-      { name: "Not started", value: progressDistribution.zero, fill: colors.border },
-      { name: "1–49%", value: progressDistribution.low, fill: "hsl(220 12% 64%)" },
-      { name: "50–99%", value: progressDistribution.mid, fill: colors.muted },
-      { name: "Complete", value: progressDistribution.full, fill: colors.foreground },
-    ],
-    [progressDistribution, colors]
-  );
-  const distributionTotal = distributionData.reduce((sum, d) => sum + d.value, 0);
-
-  const campaignStats = useMemo(() => {
-    const groups = new Map<string, CampaignStatsGroup>();
-
-    campaigns.forEach((campaign) => {
-      groups.set(campaign.id, {
-        id: campaign.id,
-        name: campaign.name,
-        totalStamps: campaign.totalStamps,
-        issuedCards: [],
-        archived: false,
-      });
-    });
-
-    filteredCards.forEach((card) => {
-      const liveCampaign = card.campaignId
-        ? campaigns.find((campaign) => campaign.id === card.campaignId)
-        : undefined;
-      const template = resolveCardTemplate(card, campaigns);
-      const groupId = liveCampaign
-        ? liveCampaign.id
-        : `deleted:${card.campaignName}:${template?.totalStamps ?? "unknown"}`;
-      const existingGroup = groups.get(groupId);
-
-      if (existingGroup) {
-        existingGroup.issuedCards.push(card);
-        if (existingGroup.totalStamps === null && template) {
-          existingGroup.totalStamps = template.totalStamps;
-        }
-        return;
+    visits.forEach((v) => {
+      if (inRange(v.timestamp, rangeStart, rangeEnd)) {
+        const b = index.get(keyFor(v.timestamp));
+        if (b) b.visits += 1;
       }
-
-      groups.set(groupId, {
-        id: groupId,
-        name: card.campaignName || template?.name || "Archived campaign",
-        totalStamps: template?.totalStamps ?? null,
-        issuedCards: [card],
-        archived: true,
+    });
+    insights.forEach(({ card, issuedAt }) => {
+      if (issuedAt !== null && inRange(issuedAt, rangeStart, rangeEnd)) {
+        const b = index.get(keyFor(issuedAt));
+        if (b) b.newCards += 1;
+      }
+      (card.history ?? []).forEach((tx) => {
+        if (tx.type === "redeem" && inRange(tx.timestamp, rangeStart, rangeEnd)) {
+          const b = index.get(keyFor(tx.timestamp));
+          if (b) b.redemptions += 1;
+        }
       });
     });
+    return { buckets, weekly };
+  }, [visits, insights, rangeStart, rangeEnd, selectedDayCount]);
 
-    return Array.from(groups.values())
-      .map((campaign) => {
-        const cards = campaign.issuedCards;
-        const active = cards.filter((card) => card.status === "Active");
-        const redeemed = cards.filter((card) => card.status === "Redeemed");
-        const avgStamps =
-          active.length > 0
-            ? active.reduce((sum, card) => sum + card.stamps, 0) / active.length
-            : 0;
-        const completionRate = cards.length > 0 ? (redeemed.length / cards.length) * 100 : 0;
-        const readyToRedeem = active.filter((card) => {
-          const template = resolveCardTemplate(card, campaigns);
-          return template ? card.stamps >= template.totalStamps : false;
-        }).length;
+  // ---------- busiest days / hours ----------
+  const { byWeekday, byHour } = useMemo(() => {
+    const weekday = WEEKDAYS.map((label) => ({ label, visits: 0 }));
+    const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: `${h % 12 || 12}${h < 12 ? "a" : "p"}`, visits: 0 }));
+    visits.forEach((v) => {
+      if (!inRange(v.timestamp, rangeStart, rangeEnd)) return;
+      const d = new Date(v.timestamp);
+      weekday[(d.getDay() + 6) % 7]!.visits += 1;
+      hours[d.getHours()]!.visits += 1;
+    });
+    // Trim the hour axis to the span that actually has visits (opening hours).
+    const active = hours.filter((h) => h.visits > 0);
+    const first = active[0]?.hour ?? 8;
+    const last = active[active.length - 1]?.hour ?? 19;
+    return { byWeekday: weekday, byHour: hours.slice(Math.min(first, 8), Math.max(last, 19) + 1) };
+  }, [visits, rangeStart, rangeEnd]);
 
-        return {
-          id: campaign.id,
-          name: campaign.name,
-          totalStamps: campaign.totalStamps,
-          archived: campaign.archived,
-          issued: cards.length,
-          active: active.length,
-          redeemed: redeemed.length,
-          avgStamps,
-          completionRate,
-          readyToRedeem,
-        };
-      })
-      .filter((c) => c.issued > 0)
-      .sort((a, b) => b.issued - a.issued);
-  }, [campaigns, filteredCards]);
+  // ---------- drop-off funnel (all-time, by visits required) ----------
+  const funnel = useMemo(() => {
+    const cards = insights;
+    const total = cards.length;
+    const reached = (pred: (r: CardInsight) => boolean) => cards.filter(pred).length;
+    const visitShare = (r: CardInsight) => {
+      if (r.stage === "redeemed") return 1;
+      const required = Math.max(r.totalStamps - r.bonusStamps, 1);
+      return r.earnedStamps / required;
+    };
+    const steps = [
+      { label: "Card issued", value: total },
+      { label: "1st visit", value: reached((r) => r.stage === "redeemed" || r.earnedStamps > 0) },
+      { label: "Halfway", value: reached((r) => visitShare(r) >= 0.5) },
+      { label: "Card full", value: reached((r) => r.stage === "redeemed" || r.stage === "ready") },
+      { label: "Redeemed", value: reached((r) => r.stage === "redeemed") },
+    ];
+    return steps.map((s) => ({ ...s, pct: total > 0 ? (s.value / total) * 100 : 0 }));
+  }, [insights]);
 
-  const tickInterval = activityBuckets.length > 16 ? Math.ceil(activityBuckets.length / 10) : 0;
+  // ---------- action lists ----------
+  const closeToReward = useMemo(
+    () =>
+      insights
+        .filter((r) => r.stage === "ready" || r.stage === "almost")
+        .sort((a, b) => a.remaining - b.remaining || (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+        .slice(0, LIST_LIMIT),
+    [insights]
+  );
+  const atRisk = useMemo(() => {
+    const rows = insights.filter(
+      (r) => r.stage !== "redeemed" && r.daysSinceActivity !== null && r.daysSinceActivity >= AT_RISK_DAYS
+    );
+    // Most invested first: they have the most to lose and are easiest to win back.
+    return { total: rows.length, rows: rows.sort((a, b) => b.progress - a.progress).slice(0, LIST_LIMIT) };
+  }, [insights]);
+  const readyCount = insights.filter((r) => r.stage === "ready").length;
+  const almostCount = insights.filter((r) => r.stage === "almost").length;
+
+  // ---------- campaign comparison (all-time) ----------
+  const campaignRows = useMemo(() => {
+    const groups = new Map<string, CardInsight[]>();
+    allInsights.forEach((r) => {
+      const key = campaignKeyOf(r.card);
+      groups.set(key, [...(groups.get(key) ?? []), r]);
+    });
+    return Array.from(groups, ([key, rows]) => {
+      const live = campaigns.find((c) => c.id === key);
+      const redeemed = rows.filter((r) => r.stage === "redeemed");
+      const withVisit = rows.filter((r) => r.stage === "redeemed" || r.earnedStamps > 0);
+      const daysToComplete = median(
+        redeemed
+          .filter((r) => r.issuedAt !== null && r.redeemedAt !== null)
+          .map((r) => (r.redeemedAt! - r.issuedAt!) / DAY_MS)
+      );
+      return {
+        key,
+        name: live?.name ?? rows[0]!.card.campaignName,
+        archived: !live,
+        enabled: live?.isEnabled !== false,
+        totalStamps: live?.totalStamps ?? rows[0]!.totalStamps,
+        bonusStamps: live ? live.bonusStamps ?? 0 : rows[0]!.bonusStamps,
+        issued: rows.length,
+        active: rows.length - redeemed.length,
+        redeemed: redeemed.length,
+        startRate: rows.length ? (withVisit.length / rows.length) * 100 : 0,
+        completionRate: rows.length ? (redeemed.length / rows.length) * 100 : 0,
+        daysToComplete,
+      };
+    }).sort((a, b) => b.issued - a.issued);
+  }, [allInsights, campaigns]);
+
+  // ---------- staff ----------
+  const staffRows = useMemo(() => {
+    const map = new Map<string, number>();
+    visits.forEach((v) => {
+      if (inRange(v.timestamp, rangeStart, rangeEnd)) map.set(v.actorName, (map.get(v.actorName) ?? 0) + v.amount);
+    });
+    const rows = Array.from(map, ([name, stamps]) => ({ name, stamps })).sort((a, b) => b.stamps - a.stamps);
+    const max = rows[0]?.stamps ?? 0;
+    return rows.map((r) => ({ ...r, share: max ? (r.stamps / max) * 100 : 0 }));
+  }, [visits, rangeStart, rangeEnd]);
+
+  const tickInterval = activitySeries.buckets.length > 16 ? Math.ceil(activitySeries.buckets.length / 10) : 0;
+  const hasRangeActivity = stats.visits > 0 || stats.redemptions > 0 || stats.newCards > 0;
+  const axisTick = { fontSize: 11, fill: colors.muted };
 
   return (
     <div className="h-full overflow-y-auto bg-background p-6 md:p-8 animate-fade-in">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
-        {/* Header + range controls */}
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        {/* Header + filters */}
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground md:text-4xl">
-              Analytics
-            </h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground md:text-4xl">Analytics</h1>
             <p className="text-sm text-muted-foreground md:text-base">
-              A pulse check on loyalty performance and customer activity.
+              Who's coming back, who's slipping away, and which campaigns actually get finished.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border/80 bg-card p-3 shadow-subtle">
-            <div className="hidden items-center gap-2 self-center pr-1 text-sm text-muted-foreground sm:flex">
-              <CalendarDays className="h-4 w-4" />
-              Range
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Campaign</label>
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={campaignFilter}
+                onChange={(e) => setCampaignFilter(e.target.value)}
+              >
+                <option value="all">All campaigns</option>
+                {campaignOptions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                From
-              </label>
+              <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">From</label>
               <Input
                 type="date"
                 className="h-10 w-[150px]"
                 value={startDate}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setStartDate(value);
-                  if (value > endDate) setEndDate(value);
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  if (e.target.value > endDate) setEndDate(e.target.value);
                 }}
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                To
-              </label>
+              <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">To</label>
               <Input
                 type="date"
                 className="h-10 w-[150px]"
                 value={endDate}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setEndDate(value);
-                  if (value < startDate) setStartDate(value);
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  if (e.target.value < startDate) setStartDate(e.target.value);
                 }}
               />
             </div>
             <div className="flex items-center gap-1.5">
-              {[7, 14, 30, 90].map((days) => (
+              {[7, 30, 90, 365].map((days) => (
                 <Button
                   key={days}
                   type="button"
@@ -546,7 +629,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
                   size="sm"
                   onClick={() => applyPresetRange(days)}
                 >
-                  {days}D
+                  {days === 365 ? "1Y" : `${days}D`}
                 </Button>
               ))}
             </div>
@@ -555,294 +638,303 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
 
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary" className="text-muted-foreground">
+            <CalendarDays className="mr-1.5 h-3.5 w-3.5" />
             {rangeLabel}
           </Badge>
           <Badge variant="outline" className="border-border/80 text-muted-foreground">
-            {Math.max(0, selectedDayCount)} days
+            {selectedDayCount} days · compared with the previous {selectedDayCount}
           </Badge>
         </div>
 
         {/* KPI strip */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <KpiCard
-            label="Active customers"
-            value={formatNumber(rangeStats.activeCustomers)}
-            sub="With activity in range"
-            icon={Users}
-            delta={describeDelta(rangeStats.activeCustomers, previousStats.activeCustomers)}
-          />
-          <KpiCard
-            label="Stamps added"
-            value={formatNumber(rangeStats.stampAdds)}
-            sub="Total stamps in range"
+            label="Visits"
+            value={formatNumber(stats.visits)}
+            sub={`${formatNumber(stats.stamps)} stamps given`}
             icon={Stamp}
-            delta={describeDelta(rangeStats.stampAdds, previousStats.stampAdds)}
+            delta={describeDelta(stats.visits, prevStats.visits)}
           />
           <KpiCard
-            label="Redemptions"
-            value={formatNumber(rangeStats.redemptions)}
-            sub="Rewards claimed in range"
+            label="Clients who visited"
+            value={formatNumber(stats.visitingClients)}
+            sub="Unique clients stamped in range"
+            icon={Users}
+            delta={describeDelta(stats.visitingClients, prevStats.visitingClients)}
+          />
+          <KpiCard
+            label="Returning clients"
+            value={`${formatPercent(returningShare)}%`}
+            sub={`${formatNumber(stats.returningClients)} had visited before`}
+            icon={Repeat}
+            delta={describeDelta(returningShare, prevReturningShare)}
+          />
+          <KpiCard
+            label="New cards"
+            value={formatNumber(stats.newCards)}
+            sub="Issued in range"
+            icon={UserPlus}
+            delta={describeDelta(stats.newCards, prevStats.newCards)}
+          />
+          <KpiCard
+            label="Rewards redeemed"
+            value={formatNumber(stats.redemptions)}
+            sub={`${formatNumber(readyCount)} more ready to claim now`}
             icon={BadgeCheck}
-            delta={describeDelta(rangeStats.redemptions, previousStats.redemptions)}
+            delta={describeDelta(stats.redemptions, prevStats.redemptions)}
           />
           <KpiCard
-            label="Redemption rate"
-            value={`${formatPercent(totals.redemptionRate)}%`}
-            sub={`${formatNumber(totals.issued)} cards active in range`}
-            icon={TrendingUp}
-          />
-          <KpiCard
-            label="Ready to redeem"
-            value={formatNumber(totals.readyToRedeem)}
-            sub="Cards at the reward threshold"
-            icon={CreditCard}
-          />
-          <KpiCard
-            label="Avg stamps / card"
-            value={formatDecimal(totals.avgStamps)}
-            sub="Momentum across active cards"
-            icon={Sparkles}
+            label="Days between visits"
+            value={stats.medianDaysBetweenVisits === null ? "—" : formatDecimal(stats.medianDaysBetweenVisits)}
+            sub="Median gap between a client's visits"
+            icon={Clock}
+            delta={
+              stats.medianDaysBetweenVisits !== null && prevStats.medianDaysBetweenVisits !== null
+                ? describeDelta(stats.medianDaysBetweenVisits, prevStats.medianDaysBetweenVisits, true)
+                : undefined
+            }
           />
         </div>
 
-        {!hasActivity && distributionTotal === 0 ? (
-          <EmptyState rangeLabel={rangeLabel} />
+        {/* Action lists */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card className="border-border/80 bg-card shadow-subtle">
+            <SectionTitle
+              title="Close to the reward"
+              sub={`${readyCount} ready to redeem · ${almostCount} within 2 stamps. A nudge here converts best.`}
+              action={
+                <Link to="/issued-cards?stage=almost&sort=remaining" className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-foreground hover:underline">
+                  All <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              }
+            />
+            <CardContent className="pt-2">
+              <ActionList
+                rows={closeToReward}
+                empty="Nobody is close to a reward right now."
+                detail={(r) => (r.stage === "ready" ? "ready to redeem" : `${r.remaining} to go`) + ` · ${formatRelativeDays(r.lastActivityAt, now).toLowerCase()}`}
+              />
+            </CardContent>
+          </Card>
+          <Card className="border-border/80 bg-card shadow-subtle">
+            <SectionTitle
+              title="Slipping away"
+              sub={`${atRisk.total} active ${atRisk.total === 1 ? "card has" : "cards have"} had no activity for ${AT_RISK_DAYS}+ days. Most progress first.`}
+              action={
+                <Link to="/issued-cards?stage=at_risk&sort=progress_desc" className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-foreground hover:underline">
+                  All <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              }
+            />
+            <CardContent className="pt-2">
+              <ActionList
+                rows={atRisk.rows}
+                empty={`No active cards inactive for ${AT_RISK_DAYS}+ days.`}
+                detail={(r) => `${r.card.stamps}/${r.totalStamps} · last seen ${r.daysSinceActivity} days ago`}
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        {!hasRangeActivity ? (
+          <Card className="border-dashed border-border bg-card/60 shadow-none">
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <Activity className="h-6 w-6 text-muted-foreground" />
+              </span>
+              <h3 className="text-base font-semibold text-foreground">No activity in this range</h3>
+              <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+                Nothing was stamped, issued or redeemed between {rangeLabel}. Try a wider window.
+              </p>
+            </CardContent>
+          </Card>
         ) : (
           <>
-            {/* Activity + distribution */}
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-              <Card className="border-border/80 bg-card shadow-subtle xl:col-span-2">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Activity over time</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    Stamps collected and rewards redeemed, by day.
-                  </p>
-                </CardHeader>
+            {/* Activity over time */}
+            <Card className="border-border/80 bg-card shadow-subtle">
+              <SectionTitle
+                title="Visits over time"
+                sub={`Stamped visits per ${activitySeries.weekly ? "week" : "day"}.`}
+              />
+              <CardContent className="pt-4">
+                <div className="h-[280px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={activitySeries.buckets} margin={{ top: 8, right: 18, left: -16, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="fillVisits" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={colors.foreground} stopOpacity={0.22} />
+                          <stop offset="100%" stopColor={colors.foreground} stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} stroke={colors.border} strokeOpacity={0.6} />
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} interval={tickInterval} tick={axisTick} tickMargin={10} />
+                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} tick={axisTick} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ stroke: colors.border }} />
+                      <Area type="monotone" name="Visits" dataKey="visits" stroke={colors.foreground} strokeWidth={2} fill="url(#fillVisits)" activeDot={{ r: 4 }} />
+                      <Area type="monotone" name="New cards" dataKey="newCards" stroke={colors.muted} strokeWidth={2} strokeDasharray="4 3" fill="none" activeDot={{ r: 4 }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-2">
+                    <span className="h-0.5 w-4 rounded-full" style={{ background: colors.foreground }} /> Visits
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-0 w-4 border-t-2 border-dashed" style={{ borderColor: colors.muted }} /> New cards
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Busiest days / hours */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <Card className="border-border/80 bg-card shadow-subtle">
+                <SectionTitle title="Busiest days" sub="Visits by day of the week, in range." />
                 <CardContent className="pt-4">
-                  <div className="h-[300px] w-full">
+                  <div className="h-[220px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={activityBuckets} margin={{ top: 8, right: 18, left: -16, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="fillStamps" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={colors.foreground} stopOpacity={0.28} />
-                            <stop offset="100%" stopColor={colors.foreground} stopOpacity={0.02} />
-                          </linearGradient>
-                          <linearGradient id="fillRedeem" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={colors.muted} stopOpacity={0.22} />
-                            <stop offset="100%" stopColor={colors.muted} stopOpacity={0.02} />
-                          </linearGradient>
-                        </defs>
-                        <XAxis
-                          dataKey="label"
-                          tickLine={false}
-                          axisLine={false}
-                          interval={tickInterval}
-                          tick={{ fontSize: 11, fill: colors.muted }}
-                          tickMargin={10}
-                        />
-                        <YAxis
-                          allowDecimals={false}
-                          tickLine={false}
-                          axisLine={false}
-                          width={40}
-                          tick={{ fontSize: 11, fill: colors.muted }}
-                        />
-                        <Tooltip content={<ChartTooltip />} cursor={{ stroke: colors.border }} />
-                        <Area
-                          type="monotone"
-                          name="Stamps"
-                          dataKey="stampAdds"
-                          stroke={colors.foreground}
-                          strokeWidth={2}
-                          fill="url(#fillStamps)"
-                          activeDot={{ r: 4 }}
-                        />
-                        <Area
-                          type="monotone"
-                          name="Redemptions"
-                          dataKey="redemptions"
-                          stroke={colors.muted}
-                          strokeWidth={2}
-                          strokeDasharray="4 3"
-                          fill="url(#fillRedeem)"
-                          activeDot={{ r: 4 }}
-                        />
-                      </AreaChart>
+                      <BarChart data={byWeekday} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
+                        <XAxis dataKey="label" tickLine={false} axisLine={false} tick={axisTick} />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} tick={axisTick} />
+                        <Tooltip content={<ChartTooltip />} cursor={{ fill: colors.border, opacity: 0.3 }} />
+                        <Bar dataKey="visits" name="Visits" fill={colors.foreground} radius={[4, 4, 0, 0]} maxBarSize={36} />
+                      </BarChart>
                     </ResponsiveContainer>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: colors.foreground }} />
-                      Stamps added
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: colors.muted }} />
-                      Redemptions
-                    </span>
                   </div>
                 </CardContent>
               </Card>
-
               <Card className="border-border/80 bg-card shadow-subtle">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">Progress distribution</CardTitle>
-                  <p className="text-sm text-muted-foreground">Active cards by completion.</p>
-                </CardHeader>
+                <SectionTitle title="Busiest hours" sub="Visits by time of day, in range." />
                 <CardContent className="pt-4">
-                  {distributionTotal === 0 ? (
-                    <p className="py-12 text-center text-sm text-muted-foreground">
-                      No active cards in this range.
-                    </p>
-                  ) : (
-                    <>
-                      <div className="relative h-[180px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={distributionData.filter((d) => d.value > 0)}
-                              dataKey="value"
-                              nameKey="name"
-                              innerRadius={56}
-                              outerRadius={80}
-                              paddingAngle={2}
-                              stroke="none"
-                            >
-                              {distributionData
-                                .filter((d) => d.value > 0)
-                                .map((entry) => (
-                                  <Cell key={entry.name} fill={entry.fill} />
-                                ))}
-                            </Pie>
-                            <Tooltip content={<ChartTooltip />} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                          <span className="text-2xl font-semibold tabular-nums text-foreground">
-                            {formatNumber(distributionTotal)}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">active cards</span>
-                        </div>
-                      </div>
-                      <div className="mt-4 space-y-2 text-sm">
-                        {distributionData.map((entry) => (
-                          <div key={entry.name} className="flex items-center justify-between">
-                            <span className="flex items-center gap-2 text-muted-foreground">
-                              <span
-                                className="h-2.5 w-2.5 rounded-full"
-                                style={{ background: entry.fill }}
-                              />
-                              {entry.name}
-                            </span>
-                            <span className="font-medium tabular-nums">{formatNumber(entry.value)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <div className="h-[220px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={byHour} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
+                        <XAxis dataKey="label" tickLine={false} axisLine={false} tick={axisTick} interval={0} />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} tick={axisTick} />
+                        <Tooltip content={<ChartTooltip />} cursor={{ fill: colors.border, opacity: 0.3 }} />
+                        <Bar dataKey="visits" name="Visits" fill={colors.foreground} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </CardContent>
               </Card>
             </div>
-
-            {/* Campaign performance */}
-            <Card className="border-border/80 bg-card shadow-subtle">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Campaign performance</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Active vs redeemed cards by campaign, in the selected range.
-                </p>
-              </CardHeader>
-              <CardContent className="pt-4">
-                {campaignStats.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-muted-foreground">
-                    No campaign activity in this range.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
-                    <div className="lg:col-span-3">
-                      <div style={{ height: Math.max(160, campaignStats.length * 56) }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={campaignStats}
-                            layout="vertical"
-                            margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
-                            barCategoryGap={16}
-                          >
-                            <XAxis
-                              type="number"
-                              allowDecimals={false}
-                              tickLine={false}
-                              axisLine={false}
-                              tick={{ fontSize: 11, fill: colors.muted }}
-                            />
-                            <YAxis
-                              type="category"
-                              dataKey="name"
-                              width={120}
-                              tickLine={false}
-                              axisLine={false}
-                              tick={{ fontSize: 12, fill: colors.foreground }}
-                            />
-                            <Tooltip content={<ChartTooltip />} cursor={{ fill: colors.border, opacity: 0.3 }} />
-                            <Bar dataKey="active" name="Active" stackId="cards" fill={colors.muted} radius={[4, 0, 0, 4]} />
-                            <Bar
-                              dataKey="redeemed"
-                              name="Redeemed"
-                              stackId="cards"
-                              fill={colors.foreground}
-                              radius={[0, 4, 4, 0]}
-                            />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full" style={{ background: colors.muted }} />
-                          Active
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full" style={{ background: colors.foreground }} />
-                          Redeemed
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 lg:col-span-2">
-                      {campaignStats.map((campaign) => (
-                        <div
-                          key={campaign.id}
-                          className="rounded-lg border border-border/80 bg-background px-3 py-2.5"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 truncate">
-                              <span className="truncate text-sm font-medium text-foreground">
-                                {campaign.name}
-                              </span>
-                              {campaign.archived && (
-                                <Badge variant="outline" className="shrink-0 text-[10px]">
-                                  Archived
-                                </Badge>
-                              )}
-                            </div>
-                            <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-                              {formatPercent(campaign.completionRate)}% redeemed
-                            </span>
-                          </div>
-                          <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
-                            <span>{campaign.issued} issued</span>
-                            <span>·</span>
-                            <span>{campaign.readyToRedeem} ready</span>
-                            <span>·</span>
-                            <span>avg {formatDecimal(campaign.avgStamps)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </>
         )}
+
+        {/* Funnel + staff */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <Card className="border-border/80 bg-card shadow-subtle xl:col-span-2">
+            <SectionTitle
+              title="Where clients drop off"
+              sub="All cards ever issued (for the selected campaign): how far they got. Gift stamps don't count as visits."
+            />
+            <CardContent className="pt-4">
+              {funnel[0]!.value === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No cards issued yet.</p>
+              ) : (
+                <div className="h-[240px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={funnel} layout="vertical" margin={{ top: 0, right: 56, left: 0, bottom: 0 }} barCategoryGap={10}>
+                      <XAxis type="number" hide domain={[0, funnel[0]!.value]} />
+                      <YAxis type="category" dataKey="label" width={96} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: colors.foreground }} />
+                      <Tooltip content={<ChartTooltip />} cursor={{ fill: colors.border, opacity: 0.3 }} />
+                      <Bar dataKey="value" name="Cards" fill={colors.foreground} radius={[0, 4, 4, 0]}>
+                        <LabelList
+                          dataKey="pct"
+                          position="right"
+                          formatter={(v: number) => `${formatPercent(v)}%`}
+                          style={{ fontSize: 12, fill: colors.muted }}
+                        />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/80 bg-card shadow-subtle">
+            <SectionTitle title="Stamps by team member" sub="Who gave stamps in range." />
+            <CardContent className="pt-4">
+              {staffRows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No stamps in this range.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {staffRows.map((row) => (
+                    <li key={row.name} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="truncate text-foreground">{row.name}</span>
+                        <span className="font-medium tabular-nums">{formatNumber(row.stamps)}</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-foreground/80" style={{ width: `${row.share}%` }} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Campaign comparison */}
+        <Card className="border-border/80 bg-card shadow-subtle">
+          <SectionTitle
+            title="Campaign comparison"
+            sub="All-time. Compare gifted vs. non-gifted campaigns: does a head start get more cards finished?"
+          />
+          <CardContent className="overflow-x-auto pt-4">
+            {campaignRows.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No cards issued yet.</p>
+            ) : (
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="py-2 pr-4 font-medium">Campaign</th>
+                    <th className="py-2 pr-4 font-medium">Stamps</th>
+                    <th className="py-2 pr-4 text-right font-medium">Issued</th>
+                    <th className="py-2 pr-4 text-right font-medium">Active</th>
+                    <th className="py-2 pr-4 text-right font-medium" title="Cards with at least one real visit">Came back</th>
+                    <th className="py-2 pr-4 text-right font-medium">Redeemed</th>
+                    <th className="py-2 text-right font-medium" title="Median days from issue to redeem">Days to finish</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaignRows.map((row) => (
+                    <tr key={row.key} className="border-b border-border/60 last:border-0">
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-2 font-medium text-foreground">
+                          {row.name}
+                          {row.archived && <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Archived</Badge>}
+                          {!row.archived && !row.enabled && <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Disabled</Badge>}
+                        </div>
+                      </td>
+                      <td className="py-3 pr-4 text-muted-foreground">
+                        <span className="tabular-nums">{row.totalStamps}</span>
+                        {row.bonusStamps > 0 && (
+                          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                            <Gift className="h-3 w-3" /> {row.bonusStamps} gifted
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-right tabular-nums">{formatNumber(row.issued)}</td>
+                      <td className="py-3 pr-4 text-right tabular-nums">{formatNumber(row.active)}</td>
+                      <td className="py-3 pr-4 text-right tabular-nums">{formatPercent(row.startRate)}%</td>
+                      <td className="py-3 pr-4 text-right">
+                        <span className="font-semibold tabular-nums">{formatPercent(row.completionRate)}%</span>
+                        <span className="ml-1 text-xs text-muted-foreground tabular-nums">({row.redeemed})</span>
+                      </td>
+                      <td className="py-3 text-right tabular-nums text-muted-foreground">
+                        {row.daysToComplete === null ? "—" : formatNumber(row.daysToComplete)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

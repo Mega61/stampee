@@ -5,7 +5,7 @@ import { RewardModal } from './RewardModal';
 import { QrCodeDisplay } from './ui/qr-code-display';
 import { generateReward } from '../services/rewardService';
 import { Template, Transaction } from '../types';
-import { cn, resolveHexAndOpacity, hexToRgba } from '../lib/utils';
+import { cn, resolveHexAndOpacity, hexToRgba, getBonusStamps } from '../lib/utils';
 import { QrCode, History, Gift, Plus, X, Minus, CreditCard, Globe } from 'lucide-react';
 import { siFacebook, siInstagram, siTiktok, siX, siYoutube } from 'simple-icons/icons';
 
@@ -46,7 +46,8 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     onStampAddTap,
     onStampRemoveTap
 }) => {
-  const [stamps, setStamps] = useState<number>(0);
+  const bonusStamps = getBonusStamps(template);
+  const [stamps, setStamps] = useState<number>(currentStamps ?? bonusStamps);
   const [showReward, setShowReward] = useState<boolean>(false);
   const [loadingReward, setLoadingReward] = useState<boolean>(false);
   const [rewardData, setRewardData] = useState<{ code: string; message: string } | null>(null);
@@ -65,14 +66,15 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     if (currentStamps !== undefined) {
         setStamps(currentStamps);
     } else {
-        // Reset internal state if template changes and no prop provided
-        setStamps(0);
+        // Reset internal state if template changes and no prop provided.
+        // Previews start at the gift so owners see what customers will get.
+        setStamps(bonusStamps);
     }
     setShowReward(false);
     setRewardData(null);
     setCurrentSlide(0);
     setHistoryUnlocked(false);
-  }, [template.id, template.totalStamps, currentStamps]);
+  }, [template.id, template.totalStamps, bonusStamps, currentStamps]);
 
   const { colors, icon: Icon, totalStamps, rewardName, showLogo } = template;
 
@@ -436,7 +438,11 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                   )}
                   style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}
                 >
-                  {template.tagline ? template.tagline : `Reúne ${totalStamps} sellos y reclama tu ${rewardName}`}
+                  {template.tagline
+                    ? template.tagline
+                    : bonusStamps > 0
+                      ? `¡Te regalamos ${bonusStamps} ${bonusStamps === 1 ? 'sello' : 'sellos'}! Completa los ${totalStamps - bonusStamps} restantes y reclama tu ${rewardName}`
+                      : `Reúne ${totalStamps} sellos y reclama tu ${rewardName}`}
                 </p>
               </div>
 
@@ -452,6 +458,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                     key={index}
                     index={index}
                     active={index < stamps}
+                    gifted={index < bonusStamps}
                     onClick={() => handleStampClick(index)}
                     icon={Icon}
                     colors={colors}
@@ -607,7 +614,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                                 <p className="text-center text-gray-400 text-sm py-4 italic">Aún no hay actividad.</p>
                             ) : (
                                 history.map((tx) => {
-                                    const TxIcon = getTransactionIcon(tx.type);
+                                    const TxIcon = tx.type === 'issued' && tx.amount > 0 ? Gift : getTransactionIcon(tx.type);
                                     const txColor = getTransactionColor(tx.type);
                                     
                                     return (

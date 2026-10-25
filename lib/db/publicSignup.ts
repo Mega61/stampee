@@ -10,6 +10,7 @@ export interface PublicCampaignSignupContext {
     id: string;
     name: string;
     isEnabled: boolean;
+    bonusStamps?: number;
   };
 }
 

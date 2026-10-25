@@ -157,7 +157,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
 
       const campaign = await db
         .selectFrom('campaigns')
-        .select(['id', 'name', 'is_enabled'])
+        .select(['id', 'name', 'is_enabled', 'bonus_stamps'])
         .where('id', '=', req.params.campaignId)
         .where('owner_id', '=', owner.id)
         .executeTakeFirst();
@@ -175,6 +175,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
             id: campaign.id,
             name: campaign.name,
             isEnabled: campaign.is_enabled,
+            bonusStamps: campaign.bonus_stamps,
           },
         },
       };

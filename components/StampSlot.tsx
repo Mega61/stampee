@@ -1,10 +1,12 @@
 import React from 'react';
-import { LucideIcon } from 'lucide-react';
+import { Gift, LucideIcon } from 'lucide-react';
 import { ThemeColors } from '../types';
 import { cn } from '../lib/utils';
 
 interface StampSlotProps {
   active: boolean;
+  /** Stamp was pre-filled as a gift when the card was issued. */
+  gifted?: boolean;
   onClick: () => void;
   index: number;
   icon: LucideIcon;
@@ -21,6 +23,7 @@ interface StampSlotProps {
 
 export const StampSlot: React.FC<StampSlotProps> = ({
   active,
+  gifted = false,
   onClick,
   index,
   icon: Icon,
@@ -46,7 +49,7 @@ export const StampSlot: React.FC<StampSlotProps> = ({
         className
       )}
       style={bgStyle ? { backgroundColor: bgStyle } : undefined}
-      aria-label={`Stamp slot ${index + 1}`}
+      aria-label={gifted ? `Stamp slot ${index + 1} (gift)` : `Stamp slot ${index + 1}`}
     >
       <div className={`transition-all duration-500 ${active ? 'scale-100 rotate-0' : 'scale-75 -rotate-12'}`}>
         <Icon 
@@ -57,6 +60,15 @@ export const StampSlot: React.FC<StampSlotProps> = ({
         />
       </div>
       
+      {gifted && active && (
+        <span
+          className="absolute -right-0.5 -top-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 bg-amber-400 text-white shadow-sm"
+          style={activeBg ? { borderColor: activeBg } : undefined}
+        >
+          <Gift size={12} strokeWidth={2.5} />
+        </span>
+      )}
+
       {/* Decorative dashed border for inactive state */}
       {!active && (
         <div

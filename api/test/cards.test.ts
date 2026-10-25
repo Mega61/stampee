@@ -136,6 +136,74 @@ describe('cards: issue + stamp + redeem lifecycle', () => {
   });
 });
 
+describe('cards: gift (bonus) stamps', () => {
+  const campaignPayload = (overrides: Record<string, unknown> = {}) => ({
+    name: 'Facial',
+    rewardName: '15% off',
+    iconKey: 'Sparkles',
+    colors: { background: '#ffffff' },
+    totalStamps: 10,
+    bonusStamps: 2,
+    ...overrides,
+  });
+
+  it('PUT /campaigns/:id persists bonusStamps and returns it', async () => {
+    const res = await rig.app.inject({
+      method: 'PUT',
+      url: '/campaigns/gift-campaign',
+      payload: campaignPayload(),
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.bonusStamps).toBe(2);
+    expect(res.json().data.totalStamps).toBe(10);
+  });
+
+  it('rejects bonusStamps >= totalStamps with 400', async () => {
+    const res = await rig.app.inject({
+      method: 'PUT',
+      url: '/campaigns/gift-campaign',
+      payload: campaignPayload({ totalStamps: 8, bonusStamps: 8 }),
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('bonusStamps');
+  });
+
+  it('campaigns without bonusStamps default to 0', async () => {
+    const res = await rig.app.inject({
+      method: 'PUT',
+      url: '/campaigns/plain-campaign',
+      payload: campaignPayload({ bonusStamps: undefined }),
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+    expect(res.json().data.bonusStamps).toBe(0);
+  });
+
+  it('POST /cards pre-fills stamps from the campaign, ignoring the client snapshot', async () => {
+    const giftCampaignId = await insertCampaign(db.pool, owner.userId, {
+      name: 'Facial',
+      totalStamps: 10,
+      bonusStamps: 2,
+    });
+    const res = await rig.app.inject({
+      method: 'POST',
+      url: '/cards',
+      payload: {
+        customerId,
+        campaignId: giftCampaignId,
+        // A stale/tampered snapshot must not change the gift.
+        templateSnapshot: { name: 'Facial', totalStamps: 10, bonusStamps: 7 },
+      },
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+    expect(res.statusCode).toBe(200);
+    const card = res.json().data;
+    expect(card.stamps).toBe(2);
+    expect(card.templateSnapshot.bonusStamps).toBe(2);
+  });
+});
+
 describe('cards: scan/inspect', () => {
   it('returns "owned" for a card in the caller\'s tenant', async () => {
     const issueRes = await rig.app.inject({
