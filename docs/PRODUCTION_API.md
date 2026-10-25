@@ -171,6 +171,88 @@ curl -sS "$BASE/scan/inspect/THE_UNIQUE_ID" -H "Authorization: Bearer $KEY"
 
 ---
 
+## 3b. Look up one client's loyalty (for admin panels)
+
+Use these instead of downloading every customer. They find a client and return
+each card **already summarized**: stamps, stamps to go, reward, gifts, dates
+and the card's public link. Read-only.
+
+```bash
+# By phone — any format: 3001234567, +57 300 123 4567, 573001234567
+curl -sS "$BASE/customers/lookup?phone=3001234567" -H "Authorization: Bearer $KEY"
+
+# By email (case-insensitive), by Stampee customer id, or free text (name/email/phone)
+curl -sS "$BASE/customers/lookup?email=laura@example.com" -H "Authorization: Bearer $KEY"
+curl -sS "$BASE/customers/lookup?id=CUSTOMER_ID"          -H "Authorization: Bearer $KEY"
+curl -sS "$BASE/customers/lookup?q=laura"                 -H "Authorization: Bearer $KEY"
+
+# One client by id (404 if not yours)
+curl -sS "$BASE/customers/CUSTOMER_ID/loyalty" -H "Authorization: Bearer $KEY"
+```
+
+| Query param       | Notes                                                                 |
+| ----------------- | --------------------------------------------------------------------- |
+| `phone`           | Matched on the last 10 digits; needs ≥ 7 digits                       |
+| `email`           | Exact match, case-insensitive                                         |
+| `id`              | Stampee customer id                                                   |
+| `q`               | Partial match on name, email or phone (≥ 2 chars)                     |
+| `includeRedeemed` | `true` to also return redeemed cards (default: active cards only)     |
+| `limit`           | Max clients returned, 1–50 (default 10). Lookup only.                 |
+
+At least one of `phone`, `email`, `id`, `q` is required (`400` otherwise).
+Params combine with AND. `/customers/lookup` returns an **array** (empty when
+nothing matches — not a 404); `/customers/:id/loyalty` returns one object.
+
+**Response** (`data[]` for lookup, `data` for `/loyalty`):
+```json
+{
+  "id": "cust-…",
+  "name": "Laura Gómez",
+  "email": "laura@example.com",
+  "mobile": "3001234567",
+  "status": "Active",
+  "totals": { "activeCards": 1, "readyToRedeem": 0, "activeStamps": 5 },
+  "cards": [
+    {
+      "id": "card-…",
+      "uniqueId": "8fa58a85-…",
+      "campaignId": "custom-…",
+      "campaignName": "Manicure Club",
+      "campaignEnabled": true,
+      "rewardName": "15% off next service",
+      "status": "Active",
+      "stamps": 5,
+      "totalStamps": 10,
+      "stampsRemaining": 5,
+      "readyToRedeem": false,
+      "giftedStamps": { "welcome": 2, "winBack": 2 },
+      "stampsFromVisits": 1,
+      "issuedAt": "2026-10-01T15:04:05.000Z",
+      "lastVisitAt": "2026-10-12T16:20:00.000Z",
+      "lastActivityAt": "2026-10-20T14:00:00.000Z",
+      "redeemedAt": null,
+      "publicUrl": "https://loyalty.goldenbeautystudio.com.co/<your-slug>/8fa58a85-…"
+    }
+  ]
+}
+```
+
+- `stamps` / `totalStamps` are exactly what the client sees on their card.
+- `giftedStamps.welcome` = pre-stamped at issue by the campaign;
+  `giftedStamps.winBack` = added later as a win-back gift. Neither is a visit;
+  `stampsFromVisits` is the part earned by coming in.
+- `lastVisitAt` = last real stamp (visit); `lastActivityAt` includes gifts,
+  redemptions and issuing.
+- `readyToRedeem` = all stamps collected, reward not yet claimed.
+- For the business's campaigns themselves (names, sizes, enabled), use
+  `GET /campaigns`.
+
+> **Call this from your panel's backend, not the browser.** The API's CORS only
+> allows the Stampee web app's origin, and an API key in browser code would be
+> visible to anyone. Keep the key in a server-side env var and proxy the call.
+
+---
+
 ## 4. Endpoint reference
 
 Every endpoint in §4.1–§4.5 requires your API key (the `Authorization: Bearer`
@@ -180,6 +262,8 @@ header). The public endpoints in §4.6 need no authentication at all.
 | Method | Path                                    | Body / notes                       |
 | ------ | --------------------------------------- | ---------------------------------- |
 | GET    | `/customers?include=cards,transactions` | **list customers + nested cards**  |
+| GET    | `/customers/lookup?phone=…`             | find a client + summarized cards (§3b) |
+| GET    | `/customers/:id/loyalty`                | one client's summarized cards (§3b) |
 | POST   | `/customers`                            | `{ name, email, mobile?, status }` |
 | PATCH  | `/customers/:id`                        | partial update                     |
 

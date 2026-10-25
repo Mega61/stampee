@@ -16,6 +16,7 @@ import { adminRoutes } from './routes/admins.js';
 import { profileRoutes } from './routes/profile.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { customerRoutes } from './routes/customers.js';
+import { lookupRoutes } from './routes/lookup.js';
 import { cardRoutes } from './routes/cards.js';
 import { publicRoutes } from './routes/public.js';
 import { storageRoutes } from './routes/storage.js';
@@ -94,6 +95,7 @@ export const buildApp = async () => {
   await app.register(profileRoutes);
   await app.register(campaignRoutes);
   await app.register(customerRoutes);
+  await app.register(lookupRoutes);
   await app.register(cardRoutes);
   await app.register(publicRoutes);
   await app.register(storageRoutes);
