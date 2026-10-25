@@ -59,7 +59,7 @@ export type StoredTemplate = Omit<Template, 'icon'> & {
 
 export interface Transaction {
   id: string;
-  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued';
+  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift';
   amount: number;
   date: string; // Formatted string for display
   timestamp: number; // For sorting

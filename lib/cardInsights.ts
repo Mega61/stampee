@@ -26,7 +26,9 @@ export interface CardInsight {
   template: Template;
   totalStamps: number;
   bonusStamps: number;
-  /** Stamps earned through visits (excludes the gift). */
+  /** Stamps added later as win-back gifts (type 'gift'). */
+  winbackStamps: number;
+  /** Stamps earned through visits (excludes all gifts). */
   earnedStamps: number;
   remaining: number;
   /** 0..1, what the customer sees on the card (gift included). */
@@ -38,6 +40,9 @@ export interface CardInsight {
   /** Last activity of any kind (stamp, removal, redeem, issue). */
   lastActivityAt: number | null;
   redeemedAt: number | null;
+  /** Last win-back gift, and whether the client visited after it. */
+  lastGiftAt: number | null;
+  cameBackAfterGift: boolean;
   daysSinceActivity: number | null;
   isArchivedCampaign: boolean;
 }
@@ -64,6 +69,8 @@ export const buildCardInsight = (
   let lastStampAt: number | null = null;
   let lastActivityAt: number | null = null;
   let redeemedAt: number | null = null;
+  let lastGiftAt: number | null = null;
+  let winbackStamps = 0;
 
   for (const tx of card.history ?? []) {
     const ts = tx.timestamp;
@@ -72,6 +79,10 @@ export const buildCardInsight = (
     if (tx.type === 'issued' && (issuedAt === null || ts < issuedAt)) issuedAt = ts;
     if (tx.type === 'stamp_add' && (lastStampAt === null || ts > lastStampAt)) lastStampAt = ts;
     if (tx.type === 'redeem' && (redeemedAt === null || ts > redeemedAt)) redeemedAt = ts;
+    if (tx.type === 'gift') {
+      winbackStamps += tx.amount;
+      if (lastGiftAt === null || ts > lastGiftAt) lastGiftAt = ts;
+    }
   }
 
   // Cards without history (very old imports) fall back to the stored dates.
@@ -79,13 +90,13 @@ export const buildCardInsight = (
   redeemedAt ??= card.status === 'Redeemed' ? parseDateOnly(card.completedDate) : null;
 
   const remaining = Math.max(totalStamps - card.stamps, 0);
-  const earnedStamps = Math.max(card.stamps - bonusStamps, 0);
+  const earnedStamps = Math.max(card.stamps - bonusStamps - winbackStamps, 0);
 
   let stage: CardStage;
   if (card.status === 'Redeemed') stage = 'redeemed';
   else if (remaining === 0) stage = 'ready';
   else if (remaining <= ALMOST_THERE_STAMPS) stage = 'almost';
-  else if (lastStampAt === null) stage = 'not_started';
+  else if (earnedStamps === 0 && lastStampAt === null) stage = 'not_started';
   else stage = 'in_progress';
 
   return {
@@ -94,6 +105,7 @@ export const buildCardInsight = (
     template,
     totalStamps,
     bonusStamps,
+    winbackStamps,
     earnedStamps,
     remaining,
     progress: Math.min(card.stamps / totalStamps, 1),
@@ -102,6 +114,8 @@ export const buildCardInsight = (
     lastStampAt,
     lastActivityAt,
     redeemedAt,
+    lastGiftAt,
+    cameBackAfterGift: lastGiftAt !== null && lastStampAt !== null && lastStampAt > lastGiftAt,
     daysSinceActivity: lastActivityAt === null ? null : Math.floor((now - lastActivityAt) / DAY_MS),
     isArchivedCampaign: card.campaignId === null,
   };
@@ -142,8 +156,9 @@ export const buildWhatsAppUrl = (mobile?: string, text?: string) => {
   const digits = (mobile ?? '').replace(/\D+/g, '');
   if (digits.length < 7) return null;
   const international = digits.length === 10 && digits.startsWith('3') ? `57${digits}` : digits;
-  const query = text ? `?text=${encodeURIComponent(text)}` : '';
-  return `https://wa.me/${international}${query}`;
+  const query = text ? `&text=${encodeURIComponent(text)}` : '';
+  // Not wa.me: its redirect mangles emoji into U+FFFD.
+  return `https://api.whatsapp.com/send?phone=${international}${query}`;
 };
 
 export const downloadCsv = (filename: string, rows: (string | number)[][]) => {

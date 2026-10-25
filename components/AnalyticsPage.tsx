@@ -258,7 +258,11 @@ const ActionList: React.FC<{
                     key={i}
                     className={cn(
                       "h-1.5 flex-1 rounded-full",
-                      i >= row.card.stamps ? "bg-muted" : i < row.bonusStamps ? "bg-amber-400" : "bg-foreground/80"
+                      i >= row.card.stamps
+                        ? "bg-muted"
+                        : i < row.bonusStamps || i >= row.card.stamps - row.winbackStamps
+                          ? "bg-amber-400"
+                          : "bg-foreground/80"
                     )}
                   />
                 ))}
@@ -521,6 +525,25 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
     return { total: rows.length, rows: rows.sort((a, b) => b.progress - a.progress).slice(0, LIST_LIMIT) };
   }, [insights]);
   const readyCount = insights.filter((r) => r.stage === "ready").length;
+
+  // Win-back gifts sent in range, and whether those clients came back after.
+  const winBack = useMemo(() => {
+    let sent = 0;
+    let cameBack = 0;
+    let redeemed = 0;
+    let stampsGifted = 0;
+    insights.forEach(({ card }) => {
+      const gifts = (card.history ?? []).filter((tx) => tx.type === "gift" && inRange(tx.timestamp, rangeStart, rangeEnd));
+      if (gifts.length === 0) return;
+      const firstGift = Math.min(...gifts.map((g) => g.timestamp));
+      sent += 1;
+      stampsGifted += gifts.reduce((sum, g) => sum + g.amount, 0);
+      const history = card.history ?? [];
+      if (history.some((tx) => tx.type === "stamp_add" && tx.timestamp > firstGift)) cameBack += 1;
+      if (history.some((tx) => tx.type === "redeem" && tx.timestamp > firstGift)) redeemed += 1;
+    });
+    return { sent, cameBack, redeemed, stampsGifted, rate: sent > 0 ? (cameBack / sent) * 100 : 0 };
+  }, [insights, rangeStart, rangeEnd]);
   const almostCount = insights.filter((r) => r.stage === "almost").length;
 
   // ---------- campaign comparison (all-time) ----------
@@ -735,6 +758,51 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
             </CardContent>
           </Card>
         </div>
+
+        {/* Win-back results */}
+        <Card className="border-amber-200/80 bg-amber-50/40 shadow-subtle">
+          <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <Gift className="h-5 w-5 text-amber-700" />
+              </span>
+              <div>
+                <h3 className="text-base font-semibold text-foreground">Win-back gifts</h3>
+                <p className="text-sm text-muted-foreground">
+                  {winBack.sent === 0
+                    ? "No gifts sent in this range. Gift stamps to inactive clients to bring them back."
+                    : `Clients gifted in range and whether they returned afterwards.`}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-6">
+              {winBack.sent > 0 && (
+                <>
+                  <div>
+                    <div className="text-2xl font-semibold tabular-nums">{formatNumber(winBack.sent)}</div>
+                    <div className="text-xs text-muted-foreground">clients gifted ({formatNumber(winBack.stampsGifted)} stamps)</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-semibold tabular-nums">
+                      {formatNumber(winBack.cameBack)} <span className="text-base font-medium text-muted-foreground">({formatPercent(winBack.rate)}%)</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">came back for a visit</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-semibold tabular-nums">{formatNumber(winBack.redeemed)}</div>
+                    <div className="text-xs text-muted-foreground">went on to redeem</div>
+                  </div>
+                </>
+              )}
+              <Link
+                to="/issued-cards?winback=1"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-amber-600 px-4 text-sm font-medium text-white hover:bg-amber-700"
+              >
+                <Gift className="h-4 w-4" /> Send a win-back gift
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
 
         {!hasRangeActivity ? (
           <Card className="border-dashed border-border bg-card/60 shadow-none">

@@ -6,7 +6,7 @@ import {
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import {
-  Plus, Search, MonitorPlay, MoreHorizontal, Trash, ExternalLink, Lock, QrCode, X, Download, MessageCircle, ChevronDown
+  Plus, Search, MonitorPlay, MoreHorizontal, Trash, ExternalLink, Lock, QrCode, X, Download, MessageCircle, ChevronDown, Gift
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -16,6 +16,7 @@ import { cn, formatGiftRemark, getBonusStamps } from "../lib/utils";
 import { Customer, Template, IssuedCard, Transaction } from '../types';
 import { KioskMode } from './KioskMode';
 import { IssueCardDialog } from './IssueCardDialog';
+import { WinBackDialog } from './WinBackDialog';
 import { resolveCardTemplate, toStoredTemplate } from '../lib/templateSerialization';
 import { useAuth } from './AuthProvider';
 import { buildPublicCardUrl } from '../lib/links';
@@ -125,7 +126,8 @@ const StampTrack: React.FC<{ row: CardInsight }> = ({ row }) => {
     <div className="flex gap-0.5" aria-label={`${row.card.stamps} of ${row.totalStamps} stamps`}>
       {Array.from({ length: row.totalStamps }).map((_, index) => {
         const filled = index < row.card.stamps;
-        const gifted = filled && index < row.bonusStamps;
+        // Signup gift fills the first slots; win-back gifts are the most recent.
+        const gifted = filled && (index < row.bonusStamps || index >= row.card.stamps - row.winbackStamps);
         return (
           <span
             key={index}
@@ -187,6 +189,14 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
   const [isIssueOpen, setIsIssueOpen] = useState(false);
   const [activeKioskData, setActiveKioskData] = useState<{ customer: Customer, card: IssuedCard, template: Template } | null>(null);
   const [isScanOpen, setIsScanOpen] = useState(false);
+  const isWinBackOpen = searchParams.get('winback') === '1' && !isStaff;
+  const setWinBackOpen = (open: boolean) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (open) next.set('winback', '1');
+      else next.delete('winback');
+      return next;
+    }, { replace: true });
 
   useEffect(() => {
     const handler = () => setIsScanOpen(true);
@@ -575,7 +585,7 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
         row.card.campaignName,
         row.card.stamps,
         row.totalStamps,
-        row.bonusStamps,
+        row.bonusStamps + row.winbackStamps,
         row.remaining,
         STAGE_LABELS[row.stage],
         formatShortDate(row.lastStampAt),
@@ -668,6 +678,15 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
         preSelectedCustomer={preSelectedCustomer}
       />
 
+      <WinBackDialog
+        isOpen={isWinBackOpen}
+        onClose={() => setWinBackOpen(false)}
+        customers={customers}
+        campaigns={campaigns}
+        slug={currentOwner?.slug}
+        onGifted={async () => { await refreshData?.(); }}
+      />
+
       <ScanQrDialog
         isOpen={isScanOpen}
         onClose={() => setIsScanOpen(false)}
@@ -683,6 +702,15 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
           <Button variant="outline" className="w-full gap-2 rounded-full sm:w-auto" onClick={() => setIsScanOpen(true)}>
             <QrCode size={16} /> Scan QR
           </Button>
+          {!isStaff && (
+            <Button
+              variant="outline"
+              className="w-full gap-2 rounded-full border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 sm:w-auto"
+              onClick={() => setWinBackOpen(true)}
+            >
+              <Gift size={16} /> Win-back gift
+            </Button>
+          )}
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
             <Button onClick={openIssueWizard} className="w-full gap-2 rounded-full px-6 shadow-sm sm:w-auto" disabled={!canIssue}>
               <Plus size={16} /> Issue New Card
@@ -876,7 +904,7 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
                             <div className="text-xs text-muted-foreground">
                               <span className="font-semibold text-foreground tabular-nums">{row.card.stamps}</span>/{row.totalStamps}
                               {!isRedeemed && row.remaining > 0 && <> · <span className="tabular-nums">{row.remaining}</span> to go</>}
-                              {row.bonusStamps > 0 && <> · <span className="text-amber-700">{row.bonusStamps} gifted</span></>}
+                              {row.bonusStamps + row.winbackStamps > 0 && <> · <span className="text-amber-700">{row.bonusStamps + row.winbackStamps} gifted</span></>}
                             </div>
                           </div>
                         </TableCell>
@@ -891,6 +919,12 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
                               : formatShortDate(row.lastStampAt)}
                             {isAtRisk(row) && ' · inactive'}
                           </div>
+                          {row.lastGiftAt !== null && (
+                            <div className={cn("mt-0.5 flex items-center gap-1 text-[11px]", row.cameBackAfterGift ? "text-emerald-700" : "text-amber-700")}>
+                              <Gift size={11} />
+                              {row.cameBackAfterGift ? 'Came back after gift' : `Gift sent ${formatRelativeDays(row.lastGiftAt, nowTs).toLowerCase()}`}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">{formatShortDate(row.issuedAt)}</TableCell>
                         <TableCell className="text-right">

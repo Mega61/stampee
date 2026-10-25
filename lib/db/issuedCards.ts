@@ -118,3 +118,25 @@ export async function fetchPublicScanEntryContext(
     return null;
   }
 }
+
+export interface GiftStampsResult {
+  cardId: string;
+  added: number;
+  stamps: number;
+  reason?: 'REDEEMED' | 'NEARLY_FULL' | 'NOT_FOUND' | 'UNKNOWN_TOTAL';
+}
+
+export async function giftStamps(
+  cardIds: string[],
+  stamps: number,
+  remarks?: string,
+): Promise<{ ok: true; results: GiftStampsResult[] } | { ok: false; error: string }> {
+  try {
+    const data = await api.post<{ results: GiftStampsResult[] }>('/cards/gift-stamps', { cardIds, stamps, remarks });
+    return { ok: true, results: data.results };
+  } catch (err) {
+    const message =
+      err instanceof ApiError ? err.message : 'Unable to gift stamps right now. Please try again.';
+    return { ok: false, error: message };
+  }
+}

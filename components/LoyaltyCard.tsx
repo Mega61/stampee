@@ -77,6 +77,11 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
   }, [template.id, template.totalStamps, bonusStamps, currentStamps]);
 
   const { colors, icon: Icon, totalStamps, rewardName, showLogo } = template;
+  // Win-back gifts sit on top of earned stamps, so mark the most recent ones.
+  const winbackStamps = Math.min(
+    history.reduce((sum, tx) => (tx.type === 'gift' ? sum + tx.amount : sum), 0),
+    Math.max(stamps - bonusStamps, 0),
+  );
 
   const orderedSocial = [
     'tiktok',
@@ -290,6 +295,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
           case 'redeem': return Gift;
           case 'stamp_remove': return Minus;
           case 'issued': return CreditCard;
+          case 'gift': return Gift;
           default: return Plus;
       }
   };
@@ -299,6 +305,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
           case 'redeem': return 'bg-purple-50 text-purple-600';
           case 'stamp_remove': return 'bg-red-50 text-red-600';
           case 'issued': return 'bg-blue-50 text-blue-600';
+          case 'gift': return 'bg-amber-50 text-amber-600';
           default: return 'bg-gray-50 text-gray-600';
       }
   };
@@ -458,7 +465,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                     key={index}
                     index={index}
                     active={index < stamps}
-                    gifted={index < bonusStamps}
+                    gifted={index < bonusStamps || (index >= stamps - winbackStamps && index < stamps)}
                     onClick={() => handleStampClick(index)}
                     icon={Icon}
                     colors={colors}

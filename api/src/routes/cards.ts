@@ -9,7 +9,7 @@ import {
   type IssuedCardRow,
   type TransactionRow,
 } from '../lib/dto.js';
-import { IssueCardBody, UpdateCardBody, TransactionBody } from '../schemas/cards.js';
+import { IssueCardBody, UpdateCardBody, TransactionBody, GiftStampsBody } from '../schemas/cards.js';
 import { randomUUID } from 'node:crypto';
 
 export const cardRoutes: FastifyPluginAsync = async (app) => {
@@ -190,6 +190,105 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
       .where('id', '=', id)
       .executeTakeFirstOrThrow();
     return { ok: true, data: toTransactionDto(row as TransactionRow) };
+  });
+
+  // POST /cards/gift-stamps — win-back gift. Adds up to `stamps` to each
+  // active card, but always leaves at least one stamp to earn so a gift never
+  // hands out a reward without a visit. Recorded as type 'gift' (not
+  // 'stamp_add') so analytics never count it as a visit. Owner/admin only.
+  app.post('/cards/gift-stamps', async (req) => {
+    const claims = await requireRole(req, 'owner', 'admin');
+    const body = parseBody(GiftStampsBody, req.body);
+    const cardIds = Array.from(new Set(body.cardIds));
+
+    let actorId: string | null = claims.sub;
+    let actorName: string | null;
+    if (claims.role === 'api') {
+      actorId = null;
+      actorName = `API: ${claims.email}`;
+    } else {
+      const actor = await db
+        .selectFrom('profiles')
+        .select('business_name')
+        .where('id', '=', claims.sub)
+        .executeTakeFirst();
+      actorName = actor?.business_name ?? null;
+    }
+
+    const now = new Date();
+    const date = now.toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
+
+    const results = await db.transaction().execute(async (trx) => {
+      const cards = await trx
+        .selectFrom('issued_cards')
+        .leftJoin('campaigns', 'campaigns.id', 'issued_cards.campaign_id')
+        .select([
+          'issued_cards.id as id',
+          'issued_cards.stamps as stamps',
+          'issued_cards.status as status',
+          'issued_cards.template_snapshot as snapshot',
+          'campaigns.total_stamps as campaignTotal',
+        ])
+        .where('issued_cards.id', 'in', cardIds)
+        .where('issued_cards.owner_id', '=', claims.ownerScopeId)
+        .forUpdate('issued_cards')
+        .execute();
+
+      const out: Array<{ cardId: string; added: number; stamps: number; reason?: string }> = [];
+      for (const card of cards) {
+        // The card's own snapshot is what the customer sees, so it wins.
+        const snapshotTotal = Number((card.snapshot as Record<string, unknown> | null)?.['totalStamps']);
+        const total = Number.isFinite(snapshotTotal) && snapshotTotal > 0 ? snapshotTotal : card.campaignTotal;
+        if (card.status !== 'Active') {
+          out.push({ cardId: card.id, added: 0, stamps: card.stamps, reason: 'REDEEMED' });
+          continue;
+        }
+        if (!total) {
+          out.push({ cardId: card.id, added: 0, stamps: card.stamps, reason: 'UNKNOWN_TOTAL' });
+          continue;
+        }
+        const added = Math.max(0, Math.min(body.stamps, total - 1 - card.stamps));
+        if (added === 0) {
+          out.push({ cardId: card.id, added: 0, stamps: card.stamps, reason: 'NEARLY_FULL' });
+          continue;
+        }
+        const stamps = card.stamps + added;
+        await trx.updateTable('issued_cards').set({ stamps }).where('id', '=', card.id).execute();
+        await trx
+          .insertInto('transactions')
+          .values({
+            id: randomUUID(),
+            card_id: card.id,
+            type: 'gift',
+            amount: added,
+            date,
+            timestamp: now.getTime(),
+            title: 'Gift Stamps',
+            remarks: body.remarks ?? null,
+            actor_id: actorId,
+            actor_name: actorName,
+            actor_role: claims.role,
+          })
+          .execute();
+        out.push({ cardId: card.id, added, stamps });
+      }
+      const found = new Set(cards.map((c) => c.id));
+      for (const id of cardIds) {
+        if (!found.has(id)) out.push({ cardId: id, added: 0, stamps: 0, reason: 'NOT_FOUND' });
+      }
+      return out;
+    });
+
+    return {
+      ok: true,
+      data: {
+        results,
+        giftedCount: results.filter((r) => r.added > 0).length,
+      },
+    };
   });
 
   // GET /scan/inspect/:uniqueId — replaces inspect_scanned_card RPC.

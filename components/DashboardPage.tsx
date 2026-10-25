@@ -54,6 +54,8 @@ const formatAction = (type: Transaction['type']) => {
       return 'Reward redeemed';
     case 'stamp_remove':
       return 'Stamp removed';
+    case 'gift':
+      return 'Gift stamps';
     default:
       return 'Stamp added';
   }
@@ -374,7 +376,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ campaigns, custome
                   >
                     <div className="flex items-start gap-3">
                       <div className="rounded-2xl bg-muted p-3 text-foreground">
-                        {transaction.type === 'redeem' ? (
+                        {transaction.type === 'redeem' || transaction.type === 'gift' ? (
                           <Gift size={18} />
                         ) : transaction.type === 'issued' ? (
                           <Wallet size={18} />

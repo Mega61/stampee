@@ -25,3 +25,10 @@ export const TransactionBody = z.object({
   title: z.string().min(1).max(200),
   remarks: z.string().max(500).optional().nullable(),
 });
+
+// Win-back gift: add stamps to several existing cards at once.
+export const GiftStampsBody = z.object({
+  cardIds: z.array(z.string().min(1).max(120)).min(1).max(500),
+  stamps: z.number().int().min(1).max(20),
+  remarks: z.string().trim().max(200).optional().nullable(),
+});

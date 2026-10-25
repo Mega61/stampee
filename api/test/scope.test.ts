@@ -95,6 +95,17 @@ describe('scope: staff cannot reach owner-only routes', () => {
     expect(res.json().error.code).toBe('FORBIDDEN');
   });
 
+  it('staff POST /cards/gift-stamps → 403 (owner-only)', async () => {
+    const t = await setupTenantA();
+    const res = await rig.app.inject({
+      method: 'POST',
+      url: '/cards/gift-stamps',
+      payload: { cardIds: [t.cardId], stamps: 2 },
+      headers: { 'content-type': 'application/json', ...withSession(t.staffSession) },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it('staff POST /staff → 403', async () => {
     const t = await setupTenantA();
     const res = await rig.app.inject({

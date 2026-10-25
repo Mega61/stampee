@@ -204,6 +204,81 @@ describe('cards: gift (bonus) stamps', () => {
   });
 });
 
+describe('cards: win-back gift stamps', () => {
+  const issue = async (campaign = campaignId) => {
+    const res = await rig.app.inject({
+      method: 'POST',
+      url: '/cards',
+      payload: { customerId, campaignId: campaign },
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+    return res.json().data.id as string;
+  };
+  const setStamps = (id: string, stamps: number, status = 'Active') =>
+    db.pool.query(`update loyalty.issued_cards set stamps = $2, status = $3 where id = $1`, [id, stamps, status]);
+  const gift = (cardIds: string[], stamps: number, remarks?: string) =>
+    rig.app.inject({
+      method: 'POST',
+      url: '/cards/gift-stamps',
+      payload: { cardIds, stamps, remarks },
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+
+  it('adds stamps and records a gift transaction (not a visit)', async () => {
+    const cardId = await issue();
+    await setStamps(cardId, 4);
+    const res = await gift([cardId], 2, 'Te extrañamos');
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.giftedCount).toBe(1);
+    expect(res.json().data.results[0]).toMatchObject({ cardId, added: 2, stamps: 6 });
+
+    const { rows } = await db.pool.query<{ type: string; amount: number; remarks: string; actor_id: string }>(
+      `select type, amount, remarks, actor_id from loyalty.transactions where card_id = $1`,
+      [cardId],
+    );
+    expect(rows).toEqual([{ type: 'gift', amount: 2, remarks: 'Te extrañamos', actor_id: owner.userId }]);
+  });
+
+  it('never fills the card: always leaves one stamp to earn', async () => {
+    const nearly = await issue();
+    await setStamps(nearly, 8); // 10-stamp campaign
+    const full = await issue();
+    await setStamps(full, 9);
+    const res = await gift([nearly, full], 5);
+    const byId = Object.fromEntries(res.json().data.results.map((r: { cardId: string }) => [r.cardId, r]));
+    expect(byId[nearly]).toMatchObject({ added: 1, stamps: 9 });
+    expect(byId[full]).toMatchObject({ added: 0, reason: 'NEARLY_FULL' });
+  });
+
+  it('skips redeemed cards and cards from another business', async () => {
+    const redeemed = await issue();
+    await setStamps(redeemed, 3, 'Redeemed');
+    const otherOwner = await insertOwner(db.pool, {
+      email: 'other@example.com', password: 'hunter2bravo', businessName: 'Other', slug: 'other',
+    });
+    const otherCampaign = await insertCampaign(db.pool, otherOwner.userId, { name: 'X' });
+    const otherCustomer = await insertCustomer(db.pool, otherOwner.userId, { name: 'Bob' });
+    await db.pool.query(
+      `insert into loyalty.issued_cards (id, customer_id, campaign_id, owner_id, campaign_name, stamps)
+       values ('foreign-card', $1, $2, $3, 'X', 3)`,
+      [otherCustomer, otherCampaign, otherOwner.userId],
+    );
+
+    const res = await gift([redeemed, 'foreign-card'], 2);
+    expect(res.json().data.giftedCount).toBe(0);
+    const reasons = res.json().data.results.map((r: { reason: string }) => r.reason).sort();
+    expect(reasons).toEqual(['NOT_FOUND', 'REDEEMED']);
+    const { rows } = await db.pool.query(`select stamps from loyalty.issued_cards where id = 'foreign-card'`);
+    expect(rows[0].stamps).toBe(3);
+  });
+
+  it('validates the gift size', async () => {
+    const cardId = await issue();
+    expect((await gift([cardId], 0)).statusCode).toBe(400);
+    expect((await gift([], 2)).statusCode).toBe(400);
+  });
+});
+
 describe('cards: scan/inspect', () => {
   it('returns "owned" for a card in the caller\'s tenant', async () => {
     const issueRes = await rig.app.inject({

@@ -102,7 +102,7 @@ export interface IssuedCardsTable {
 export interface TransactionsTable {
   id: ColumnType<string, string | undefined, string>;
   card_id: string;
-  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued';
+  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift';
   amount: ColumnType<number, number | undefined, number>;
   date: string;
   timestamp: number;
