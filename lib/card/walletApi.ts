@@ -1,14 +1,15 @@
-// Google Wallet client calls (docs/CARD_ENGAGEMENT_PLAN.md §7.3).
+// Google / Apple Wallet client calls (docs/CARD_ENGAGEMENT_PLAN.md §7.3).
 // The config answer is cached for the tab session: it only changes when the
 // API is redeployed with (or without) wallet credentials.
-import { api } from '../api';
+import { API_BASE, api } from '../api';
 
 export interface WalletConfig {
   google: boolean;
+  apple: boolean;
 }
 
 const CONFIG_KEY = 'stampee:wallet-config';
-const OFF: WalletConfig = { google: false };
+const OFF: WalletConfig = { google: false, apple: false };
 let inflight: Promise<WalletConfig> | null = null;
 
 const readCached = (): WalletConfig | null => {
@@ -16,7 +17,7 @@ const readCached = (): WalletConfig | null => {
     const raw = sessionStorage.getItem(CONFIG_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<WalletConfig>;
-    return { google: parsed.google === true };
+    return { google: parsed.google === true, apple: parsed.apple === true };
   } catch {
     return null;
   }
@@ -29,7 +30,7 @@ export const fetchWalletConfig = (): Promise<WalletConfig> => {
   inflight ??= api
     .get<Partial<WalletConfig>>('/public/wallet/config')
     .then((data) => {
-      const config = { google: data?.google === true };
+      const config = { google: data?.google === true, apple: data?.apple === true };
       try {
         sessionStorage.setItem(CONFIG_KEY, JSON.stringify(config));
       } catch {
@@ -52,10 +53,21 @@ export const fetchGoogleSaveUrl = async (slug: string, uniqueId: string): Promis
 };
 
 /**
+ * The signed `.pkpass` download. Navigating to it (not fetch) is what makes
+ * Safari show the "Add to Apple Wallet" sheet.
+ */
+export const appleWalletPassUrl = (slug: string, uniqueId: string): string =>
+  `${API_BASE}/public/cards/${encodeURIComponent(slug)}/${encodeURIComponent(uniqueId)}/wallet/apple`;
+
+/** iPhone / iPod / iPad, including iPadOS's desktop-class "Macintosh" UA. */
+export const isAppleMobile = (ua: string, maxTouchPoints = 0): boolean =>
+  /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && maxTouchPoints > 1);
+
+/**
  * Google Wallet is useless on iPhone/iPad (Apple Wallet only), so the button
  * is hidden there. Android and desktop browsers get it.
  */
-export const canOfferGoogleWallet = (ua: string, maxTouchPoints = 0): boolean => {
-  const iOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && maxTouchPoints > 1);
-  return !iOS;
-};
+export const canOfferGoogleWallet = (ua: string, maxTouchPoints = 0): boolean => !isAppleMobile(ua, maxTouchPoints);
+
+/** Apple Wallet: iPhone/iPad only (the exact complement of Google). */
+export const canOfferAppleWallet = (ua: string, maxTouchPoints = 0): boolean => isAppleMobile(ua, maxTouchPoints);

@@ -237,7 +237,7 @@ const iconCache = new Map<string, { at: number; png: Buffer }>();
 // never re-fetch the logo.
 const LOGO_CACHE_MAX = 32;
 const logoCache = new Map<string, { at: number; buf: Buffer }>();
-const cachedLogo = async (ownerId: string, ref: string) => {
+export const cachedLogo = async (ownerId: string, ref: string) => {
   const key = `${ownerId}|${ref}`;
   const hit = logoCache.get(key);
   if (hit && Date.now() - hit.at < ICON_CACHE_TTL_MS) return hit.buf;

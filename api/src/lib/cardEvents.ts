@@ -2,10 +2,12 @@
 // card's stamps or status is committed (stamp add/remove, redeem, gift, game
 // win). It must never block or fail the caller's response.
 //
-// Today the only listener is the Google Wallet sync (lib/wallet/google.ts).
-// Calls are debounced per card: the kiosk stamps with PATCH /cards/:id and
+// Listeners: the Google Wallet sync (lib/wallet/google.ts) and the Apple
+// Wallet notifier (lib/wallet/apple.ts: bump the pass, push its devices). They
+// run independently: one failing never skips the other. Calls are debounced per card: the kiosk stamps with PATCH /cards/:id and
 // POST /cards/:id/transactions back to back, which should become one update.
 import { isGoogleWalletEnabled, syncGooglePass } from './wallet/google.js';
+import { isAppleWalletEnabled, notifyApplePass } from './wallet/apple.js';
 
 export const CARD_EVENT_DEBOUNCE_MS = 1000;
 
@@ -35,6 +37,19 @@ const run = (cardId: string) => {
     } catch (err) {
       logger.error({ err, cardId }, 'wallet sync failed');
     }
+    try {
+      const result = await notifyApplePass(cardId);
+      // 410 (device gone) is handled there; anything else is worth a log.
+      const failed = result?.pushed.filter((r) => r.status !== 200 && r.status !== 410) ?? [];
+      if (failed.length) {
+        logger.error(
+          { cardId, failed: failed.map((r) => ({ status: r.status, reason: r.reason })) },
+          'apple wallet push failed',
+        );
+      }
+    } catch (err) {
+      logger.error({ err, cardId }, 'apple wallet notify failed');
+    }
   })();
   inFlight.add(task);
   void task.finally(() => inFlight.delete(task));
@@ -42,7 +57,7 @@ const run = (cardId: string) => {
 
 export const onCardChanged = (cardId: string): void => {
   try {
-    if (!cardId || !isGoogleWalletEnabled()) return;
+    if (!cardId || !(isGoogleWalletEnabled() || isAppleWalletEnabled())) return;
     const pending = timers.get(cardId);
     if (pending) clearTimeout(pending);
     const timer = setTimeout(() => run(cardId), CARD_EVENT_DEBOUNCE_MS);
