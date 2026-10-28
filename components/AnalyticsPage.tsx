@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
+import { EngagementSection } from "./analytics/EngagementSection";
 import { Customer, Template } from "../types";
 import { cn } from "../lib/utils";
 import {
@@ -1003,6 +1004,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ customers, campaig
             )}
           </CardContent>
         </Card>
+
+        {/* Card engagement (server-computed, all campaigns) */}
+        <EngagementSection from={startDate} to={endDate} />
       </div>
     </div>
   );
