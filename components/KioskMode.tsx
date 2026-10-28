@@ -64,6 +64,8 @@ const formatKioskAction = (type: Transaction['type']) => {
             return 'Stamp removed';
         case 'gift':
             return 'Gift stamps';
+        case 'bonus':
+            return 'Bonus stamp (game)';
         default:
             return 'Stamp added';
     }

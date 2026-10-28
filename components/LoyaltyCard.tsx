@@ -6,10 +6,35 @@ import { QrCodeDisplay } from './ui/qr-code-display';
 import { generateReward } from '../services/rewardService';
 import { Template, Transaction } from '../types';
 import { cn, resolveHexAndOpacity, hexToRgba, getBonusStamps } from '../lib/utils';
-import { QrCode, History, Gift, Plus, X, Minus, CreditCard, Globe } from 'lucide-react';
+import { getLateGiftStamps, getStampSizing, isGiftedSlot, type StampSizing } from '../lib/card/stampLayout';
+import { QrCode, History, Gift, Plus, X, Minus, CreditCard, Globe, Sparkles } from 'lucide-react';
 import { siFacebook, siInstagram, siTiktok, siX, siYoutube } from 'simple-icons/icons';
 
 const LottiePlayer = lazy(() => import('lottie-react'));
+
+/** Everything a replacement stamp grid needs; see `renderStampGrid`. */
+export interface StampGridContext {
+  stamps: number;
+  totalStamps: number;
+  bonusStamps: number;
+  /** Win-back + game stamps shown as the most recent slots. */
+  lateGiftStamps: number;
+  isGifted: (index: number) => boolean;
+  icon: Template['icon'];
+  colors: {
+    stampActive: string;
+    stampInactive: string;
+    iconActive: string;
+    iconInactive: string;
+    text: string;
+    muted: string;
+  };
+  sizing: StampSizing;
+  isHighDensity: boolean;
+  isCompleted: boolean;
+  isRedeemed: boolean;
+  history: Transaction[];
+}
 
 interface LoyaltyCardProps {
   template: Template;
@@ -27,6 +52,18 @@ interface LoyaltyCardProps {
   isRedeemed?: boolean;
   onStampAddTap?: () => void;
   onStampRemoveTap?: () => void;
+  /** Replaces the default StampSlot grid (public fx card). */
+  renderStampGrid?: (ctx: StampGridContext) => React.ReactNode;
+  /** Extra content under the reward line on the front (game ticket, install, wallet). */
+  footerSlot?: React.ReactNode;
+  /** Wraps the front-slide content (tilt surface). */
+  wrapFront?: (node: React.ReactNode) => React.ReactNode;
+  /** Replaces the tagline under the title. */
+  subtitle?: React.ReactNode;
+  /** 'external': the caller reveals the reward itself; no auto RewardModal. */
+  rewardRevealMode?: 'modal' | 'external';
+  /** Recolors the completion Lottie to the campaign theme. */
+  transformGiftAnimation?: (data: object) => object;
 }
 
 export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({ 
@@ -44,7 +81,13 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     history = [],
     isRedeemed = false,
     onStampAddTap,
-    onStampRemoveTap
+    onStampRemoveTap,
+    renderStampGrid,
+    footerSlot,
+    wrapFront,
+    subtitle,
+    rewardRevealMode = 'modal',
+    transformGiftAnimation
 }) => {
   const bonusStamps = getBonusStamps(template);
   const [stamps, setStamps] = useState<number>(currentStamps ?? bonusStamps);
@@ -77,11 +120,8 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
   }, [template.id, template.totalStamps, bonusStamps, currentStamps]);
 
   const { colors, icon: Icon, totalStamps, rewardName, showLogo } = template;
-  // Win-back gifts sit on top of earned stamps, so mark the most recent ones.
-  const winbackStamps = Math.min(
-    history.reduce((sum, tx) => (tx.type === 'gift' ? sum + tx.amount : sum), 0),
-    Math.max(stamps - bonusStamps, 0),
-  );
+  // Win-back and game stamps sit on top of earned stamps, so mark the most recent ones.
+  const lateGiftStamps = getLateGiftStamps(history, stamps, bonusStamps);
 
   const orderedSocial = [
     'tiktok',
@@ -149,7 +189,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
 
   const isHighDensity = totalStamps > 12;
   const isCompleted = stamps >= totalStamps;
-  const shouldShowRewardModal = mode !== 'preview';
+  const shouldShowRewardModal = mode !== 'preview' && rewardRevealMode === 'modal';
 
   const textColor = resolveHexAndOpacity(colors.text, '#111111');
   const mutedColor = resolveHexAndOpacity(colors.muted, '#666666');
@@ -166,7 +206,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     let cancelled = false;
     void import('../Gift Box Orange.json').then((module) => {
       if (!cancelled) {
-        setGiftAnimation(module.default);
+        setGiftAnimation(transformGiftAnimation ? transformGiftAnimation(module.default) : module.default);
       }
     }).catch(() => {
       if (!cancelled) {
@@ -179,27 +219,12 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     };
   }, [isCompleted, isRedeemed]);
 
-  const stampSizing = (() => {
-    if (sizeVariant === 'compact') {
-      return totalStamps >= 13
-        ? { sizeClassName: "w-12 h-12 sm:w-14 sm:h-14", iconSize: 22 }
-        : totalStamps >= 9
-          ? { sizeClassName: "w-14 h-14 sm:w-16 sm:h-16", iconSize: 26 }
-          : { sizeClassName: "w-16 h-16 sm:w-[4.5rem] sm:h-[4.5rem]", iconSize: 32 };
-    }
-    if (isMobileCompleted) {
-      return totalStamps >= 13
-        ? { sizeClassName: "w-12 h-12 sm:w-16 sm:h-16", iconSize: 22 }
-        : totalStamps >= 9
-          ? { sizeClassName: "w-14 h-14 sm:w-[4.5rem] sm:h-[4.5rem]", iconSize: 26 }
-          : { sizeClassName: "w-16 h-16 sm:w-20 sm:h-20", iconSize: 30 };
-    }
-    return totalStamps >= 13
-      ? { sizeClassName: "w-14 h-14 sm:w-16 sm:h-16", iconSize: 26 }
-      : totalStamps >= 9
-        ? { sizeClassName: "w-16 h-16 sm:w-[4.5rem] sm:h-[4.5rem]", iconSize: 30 }
-        : { sizeClassName: "w-20 h-20 sm:w-20 sm:h-20", iconSize: 38 };
-  })();
+  const stampSizing = getStampSizing(totalStamps, {
+    compact: sizeVariant === 'compact',
+    mobileCompleted: isMobileCompleted,
+  });
+
+  const renderFront = (node: React.ReactNode) => (wrapFront ? wrapFront(node) : node);
 
   const handleStampClick = (index: number) => {
     if (readOnly && !onStampAddTap && !onStampRemoveTap) return;
@@ -239,7 +264,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
   };
 
   useEffect(() => {
-    const shouldAutoShowReward = mode === 'public' || (mode === 'active' && readOnly);
+    const shouldAutoShowReward = rewardRevealMode === 'modal' && (mode === 'public' || (mode === 'active' && readOnly));
     if (!shouldAutoShowReward) return;
     if (isRedeemed) {
       setShowReward(false);
@@ -251,7 +276,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
       return;
     }
     setShowReward(false);
-  }, [isCompleted, isRedeemed, mode, readOnly]);
+  }, [isCompleted, isRedeemed, mode, readOnly, rewardRevealMode]);
 
   const resetCard = () => {
     if (readOnly) {
@@ -296,6 +321,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
           case 'stamp_remove': return Minus;
           case 'issued': return CreditCard;
           case 'gift': return Gift;
+          case 'bonus': return Sparkles;
           default: return Plus;
       }
   };
@@ -306,6 +332,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
           case 'stamp_remove': return 'bg-red-50 text-red-600';
           case 'issued': return 'bg-blue-50 text-blue-600';
           case 'gift': return 'bg-amber-50 text-amber-600';
+          case 'bonus': return 'bg-yellow-50 text-yellow-600';
           default: return 'bg-gray-50 text-gray-600';
       }
   };
@@ -324,7 +351,9 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
           className="absolute inset-0 z-0 bg-cover bg-center transition-all duration-1000"
           style={{ 
             backgroundImage: `url(${template.backgroundImage})`,
-            transform: currentSlide === 1 ? 'scale(1.1)' : 'scale(1)' // Subtle zoom on background change
+            // Subtle zoom on background change. --fx-parallax-x/y are set by the
+            // public card's tilt surface (0 everywhere else).
+            transform: `translate3d(var(--fx-parallax-x, 0px), var(--fx-parallax-y, 0px), 0) scale(${currentSlide === 1 ? 1.1 : 1})`
           }}
         />
       )}
@@ -383,6 +412,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                  </button>
             </div>
 
+            {renderFront(
             <div className={cn(
                 "relative z-10 w-full max-w-lg flex flex-col items-center transition-all duration-1000 delay-100 ease-out",
                 mode === 'preview' ? 'scale-90' : 'scale-100',
@@ -445,7 +475,9 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                   )}
                   style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}
                 >
-                  {template.tagline
+                  {subtitle !== undefined
+                    ? subtitle
+                    : template.tagline
                     ? template.tagline
                     : bonusStamps > 0
                       ? `¡Te regalamos ${bonusStamps} ${bonusStamps === 1 ? 'sello' : 'sellos'}! Completa los ${totalStamps - bonusStamps} restantes y reclama tu ${rewardName}`
@@ -455,17 +487,38 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
 
               {/* Stamps Grid */}
               <div className={cn(
-                  "relative grid grid-cols-4 justify-items-center max-w-sm transition-all",
+                  "relative max-w-sm transition-all",
                   isCompleted ? "mb-6" : "mb-12",
-                  isHighDensity ? "gap-2" : "gap-4",
-                  readOnly && !onStampAddTap && !onStampRemoveTap && "pointer-events-none" // Disable interaction in read-only unless tap callbacks are provided
+                  !renderStampGrid && "grid grid-cols-4 justify-items-center",
+                  !renderStampGrid && (isHighDensity ? "gap-2" : "gap-4"),
+                  !renderStampGrid && readOnly && !onStampAddTap && !onStampRemoveTap && "pointer-events-none" // Disable interaction in read-only unless tap callbacks are provided
               )}>
-                {Array.from({ length: totalStamps }).map((_, index) => (
+                {renderStampGrid ? renderStampGrid({
+                  stamps,
+                  totalStamps,
+                  bonusStamps,
+                  lateGiftStamps,
+                  isGifted: (index) => isGiftedSlot(index, stamps, bonusStamps, lateGiftStamps),
+                  icon: Icon,
+                  colors: {
+                    stampActive: stampActiveColor.hex,
+                    stampInactive: stampInactiveColor.hex,
+                    iconActive: iconActiveColor.hex,
+                    iconInactive: iconInactiveColor.hex,
+                    text: textColor.hex,
+                    muted: mutedColor.hex,
+                  },
+                  sizing: stampSizing,
+                  isHighDensity,
+                  isCompleted,
+                  isRedeemed,
+                  history,
+                }) : Array.from({ length: totalStamps }).map((_, index) => (
                   <StampSlot 
                     key={index}
                     index={index}
                     active={index < stamps}
-                    gifted={index < bonusStamps || (index >= stamps - winbackStamps && index < stamps)}
+                    gifted={isGiftedSlot(index, stamps, bonusStamps, lateGiftStamps)}
                     onClick={() => handleStampClick(index)}
                     icon={Icon}
                     colors={colors}
@@ -494,12 +547,12 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
               </div>
 
               {/* Congratulations Message or Reward Label */}
-              {isCompleted && !isRedeemed && shouldShowRewardModal ? (
+              {isCompleted && !isRedeemed && mode !== 'preview' ? (
                  <div className="mt-3 flex flex-col items-center text-center">
-                   <h3 className={cn("text-lg md:text-2xl font-bold text-gray-900 mt-1", isMobileCompleted && "text-base")}>
+                   <h3 className={cn("text-lg md:text-2xl font-bold mt-1", isMobileCompleted && "text-base")} style={{ color: textColor.hex }}>
                      🎉 ¡Felicitaciones! 🎉
                    </h3>
-                   <p className={cn("text-base md:text-lg text-gray-600 leading-snug", isMobileCompleted && "text-sm")}>
+                   <p className={cn("text-base md:text-lg leading-snug", isMobileCompleted && "text-sm")} style={{ color: hexToRgba(mutedColor.hex, mutedColor.opacity) }}>
                       ¡Tu próximo <strong>{rewardName}</strong> es gratis! Muéstralo al personal.
                    </p>
                  </div>
@@ -515,7 +568,10 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                   </div>
               )}
 
+              {footerSlot}
+
             </div>
+            )}
 
             {orderedEntries.length > 0 && (
               <div className="mt-6 inline-flex items-center justify-center gap-4">

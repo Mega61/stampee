@@ -71,6 +71,12 @@ export interface CampaignsTable {
   total_stamps: ColumnType<number, number | undefined, number>;
   bonus_stamps: ColumnType<number, number | undefined, number>;
   social: Record<string, unknown> | null;
+  // 0013_campaign_fx_style.sql
+  fx_style: ColumnType<'elegant' | 'playful' | 'minimal', 'elegant' | 'playful' | 'minimal' | undefined, 'elegant' | 'playful' | 'minimal'>;
+  // 0015_card_game.sql
+  game_enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  game_win_pct: ColumnType<number, number | undefined, number>;
+  game_monthly_cap: ColumnType<number, number | undefined, number>;
   created_at: Generated<Date>;
 }
 
@@ -102,7 +108,7 @@ export interface IssuedCardsTable {
 export interface TransactionsTable {
   id: ColumnType<string, string | undefined, string>;
   card_id: string;
-  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift';
+  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift' | 'bonus';
   amount: ColumnType<number, number | undefined, number>;
   date: string;
   timestamp: number;
@@ -127,6 +133,40 @@ export interface ApiKeysTable {
   created_at: Generated<Date>;
 }
 
+// 0012_card_views.sql — one row per card-open session (engagement beacon).
+export interface CardViewsTable {
+  id: ColumnType<string, string | undefined, string>;
+  card_id: string;
+  owner_id: string;
+  session_id: string;
+  source: 'link' | 'pwa' | 'wallet' | 'whatsapp';
+  variant: 'fx' | 'holdout';
+  started_at: Generated<Date>;
+  duration_ms: ColumnType<number, number | undefined, number>;
+  interactions: ColumnType<number, number | undefined, number>;
+  saw_new_stamps: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+// 0014_wallet_passes.sql
+export interface WalletPassesTable {
+  card_id: string;
+  provider: 'google' | 'apple';
+  object_id: string;
+  created_at: Generated<Date>;
+  last_synced_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
+// 0015_card_game.sql — one row per card per ISO week (America/Bogota).
+export interface CardPlaysTable {
+  id: ColumnType<string, string | undefined, string>;
+  card_id: string;
+  owner_id: string;
+  period_key: string;
+  played_at: Generated<Date>;
+  won: boolean;
+  stamps_awarded: ColumnType<number, number | undefined, number>;
+}
+
 export interface Database {
   users: UsersTable;
   profiles: ProfilesTable;
@@ -138,4 +178,7 @@ export interface Database {
   issued_cards: IssuedCardsTable;
   transactions: TransactionsTable;
   api_keys: ApiKeysTable;
+  card_views: CardViewsTable;
+  wallet_passes: WalletPassesTable;
+  card_plays: CardPlaysTable;
 }

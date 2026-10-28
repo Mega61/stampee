@@ -42,7 +42,17 @@ export interface Template {
   // still sees `totalStamps` slots but only needs totalStamps - bonusStamps visits.
   bonusStamps?: number;
   social?: SocialLinks;
+  // Animation energy on the customer-facing card. Read from the live campaign
+  // (falls back to the snapshot) so owners can change it for issued cards.
+  fxStyle?: FxStyle;
+  // Weekly scratch game ("Raspa y gana"). Live-campaign settings, see
+  // docs/CARD_ENGAGEMENT_PLAN.md §8.
+  gameEnabled?: boolean;
+  gameWinPct?: number;
+  gameMonthlyCap?: number;
 }
+
+export type FxStyle = 'elegant' | 'playful' | 'minimal';
 
 export interface SocialLinks {
   instagram?: string;
@@ -59,7 +69,9 @@ export type StoredTemplate = Omit<Template, 'icon'> & {
 
 export interface Transaction {
   id: string;
-  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift';
+  // 'gift'  = win-back stamps from the owner (never a visit).
+  // 'bonus' = stamps won in the weekly scratch game (never a visit).
+  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift' | 'bonus';
   amount: number;
   date: string; // Formatted string for display
   timestamp: number; // For sorting
@@ -128,4 +140,47 @@ export interface User {
   status: AccountStatus;
   access: AccessStatus;
   createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Customer card engagement (docs/CARD_ENGAGEMENT_PLAN.md)
+// ---------------------------------------------------------------------------
+
+/** Where a card-open session came from. */
+export type CardViewSource = 'link' | 'pwa' | 'wallet' | 'whatsapp';
+
+/** A/B arm: 'holdout' cards keep the classic card for the experiment window. */
+export type CardVariant = 'fx' | 'holdout';
+
+/** Body of POST /public/cards/:slug/:uniqueId/views (sent as JSON or text/plain). */
+export interface CardViewEvent {
+  sessionId: string;
+  source: CardViewSource;
+  variant: CardVariant;
+  durationMs: number;
+  interactions: number;
+  sawNewStamps: boolean;
+}
+
+export type GameStateKind = 'available' | 'played' | 'locked' | 'disabled' | 'holdout';
+
+/** GET /public/cards/:slug/:uniqueId/game, also embedded as `game` in the public card response. */
+export interface GameState {
+  state: GameStateKind;
+  /** ISO timestamp of the next Monday 00:00 America/Bogota. */
+  nextPlayAt: string;
+  /** Only for 'locked': why the card can't play. */
+  reason?: 'NO_RECENT_VISIT' | 'NOT_ACTIVE';
+  /** Only for 'played': this week's result. */
+  lastResult?: { won: boolean; stampsAwarded: number; playedAt: string };
+}
+
+/** POST /public/cards/:slug/:uniqueId/game/play */
+export interface PlayResult {
+  won: boolean;
+  stampsAwarded: number;
+  /** Card stamps after the play. */
+  stamps: number;
+  nextPlayAt: string;
+  periodKey: string;
 }

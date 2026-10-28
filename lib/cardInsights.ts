@@ -71,6 +71,7 @@ export const buildCardInsight = (
   let redeemedAt: number | null = null;
   let lastGiftAt: number | null = null;
   let winbackStamps = 0;
+  let gameStamps = 0;
 
   for (const tx of card.history ?? []) {
     const ts = tx.timestamp;
@@ -79,6 +80,8 @@ export const buildCardInsight = (
     if (tx.type === 'issued' && (issuedAt === null || ts < issuedAt)) issuedAt = ts;
     if (tx.type === 'stamp_add' && (lastStampAt === null || ts > lastStampAt)) lastStampAt = ts;
     if (tx.type === 'redeem' && (redeemedAt === null || ts > redeemedAt)) redeemedAt = ts;
+    // Game stamps are never visits either.
+    if (tx.type === 'bonus') gameStamps += tx.amount;
     if (tx.type === 'gift') {
       winbackStamps += tx.amount;
       if (lastGiftAt === null || ts > lastGiftAt) lastGiftAt = ts;
@@ -90,7 +93,7 @@ export const buildCardInsight = (
   redeemedAt ??= card.status === 'Redeemed' ? parseDateOnly(card.completedDate) : null;
 
   const remaining = Math.max(totalStamps - card.stamps, 0);
-  const earnedStamps = Math.max(card.stamps - bonusStamps - winbackStamps, 0);
+  const earnedStamps = Math.max(card.stamps - bonusStamps - winbackStamps - gameStamps, 0);
 
   let stage: CardStage;
   if (card.status === 'Redeemed') stage = 'redeemed';

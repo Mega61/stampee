@@ -120,7 +120,7 @@ export const toIssuedCardDto = (r: IssuedCardRow) => ({
 export type TransactionRow = {
   id: string;
   card_id: string;
-  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift';
+  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift' | 'bonus';
   amount: number;
   date: string;
   timestamp: number;
