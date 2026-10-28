@@ -128,6 +128,35 @@ gcloud storage buckets update gs://stampee-backups --lifecycle-file=- <<'EOF'
 EOF
 ```
 
+## Media bucket CORS (uploads + card theming)
+
+The browser talks to the media bucket (`GCS_BUCKET`) directly: it `PUT`s
+uploads to presigned URLs, and the public card reads the uploaded background
+photo's pixels (`crossOrigin="anonymous"` image → 16×16 canvas) so card
+effects can adapt to how light/busy the photo is (`lib/card/imageLuma.ts`,
+docs/CARD_ENGAGEMENT_PLAN.md §5.0). Both need CORS for the SPA origin. Without
+`GET` the card still works, it just falls back to quieter, overlay-only effects.
+
+`gsutil cors set` **replaces** the whole CORS config, so keep `PUT` in it:
+
+```bash
+cat > cors.json <<'EOF'
+[
+  {
+    "origin": ["https://loyalty.goldenbeautystudio.com.co"],
+    "method": ["GET", "PUT"],
+    "responseHeader": ["Content-Type", "Cache-Control"],
+    "maxAgeSeconds": 3600
+  }
+]
+EOF
+gsutil cors set cors.json gs://gbs-apps-media
+gsutil cors get gs://gbs-apps-media   # verify
+```
+
+Use your own `SPA_ORIGIN` and bucket name (add `http://localhost:3000` to
+`origin` to test sampling against the real bucket from a dev server).
+
 ## Adding Strapi later
 
 Strapi is intentionally not in `docker-compose.yml`. When you wire it in:

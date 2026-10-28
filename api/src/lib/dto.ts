@@ -19,6 +19,7 @@ export type CampaignRow = {
   total_stamps: number;
   bonus_stamps: number | null;
   social: Record<string, unknown> | null;
+  fx_style?: 'elegant' | 'playful' | 'minimal' | null;
   created_at: Date | string;
 };
 
@@ -39,6 +40,7 @@ export const toCampaignDto = (r: CampaignRow) => ({
   totalStamps: r.total_stamps,
   bonusStamps: r.bonus_stamps ?? 0,
   social: r.social ?? undefined,
+  fxStyle: r.fx_style ?? 'elegant',
 });
 
 // Same shape as toCampaignDto, but converts logo_image / background_image

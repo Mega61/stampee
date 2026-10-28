@@ -3,6 +3,8 @@ import { z } from 'zod';
 const colorsSchema = z.record(z.string());
 const socialSchema = z.record(z.string()).nullable().optional();
 
+export const FX_STYLES = ['elegant', 'playful', 'minimal'] as const;
+
 // Match the SPA's StoredTemplate camelCase shape exactly.
 export const CampaignBody = z
   .object({
@@ -27,6 +29,9 @@ export const CampaignBody = z
     // at least one stamp for the customer to earn.
     bonusStamps: z.number().int().min(0).max(99).optional(),
     social: socialSchema,
+    // Card animation energy (docs/CARD_ENGAGEMENT_PLAN.md §5.0). Omitted on
+    // update keeps the stored value; omitted on create uses the DB default.
+    fxStyle: z.enum(FX_STYLES).optional(),
   })
   .refine((c) => (c.bonusStamps ?? 0) < c.totalStamps, {
     message: 'Gift stamps must be fewer than the total number of stamps.',

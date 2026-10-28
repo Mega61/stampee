@@ -26,6 +26,8 @@ const campaignValuesFromBody = (body: CampaignBody, ownerId: string, id: string)
   total_stamps: body.totalStamps,
   bonus_stamps: body.bonusStamps ?? 0,
   social: body.social ?? null,
+  // Only written when sent, so clients that predate it don't reset it.
+  ...(body.fxStyle ? { fx_style: body.fxStyle } : {}),
 });
 
 export const campaignRoutes: FastifyPluginAsync = async (app) => {

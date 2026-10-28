@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Template } from '../types';
+import { FxStyle, Template } from '../types';
 import { LoyaltyCard } from './LoyaltyCard';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -18,6 +18,13 @@ interface CardEditorProps {
   initialTemplate: Template;
   onSave: (template: Template) => Promise<void>;
 }
+
+// Customer-card animation energy (docs/CARD_ENGAGEMENT_PLAN.md §5.0).
+const FX_STYLE_OPTIONS: { value: FxStyle; label: string; hint: string }[] = [
+  { value: 'elegant', label: 'Elegant', hint: 'Soft shine and subtle particles' },
+  { value: 'playful', label: 'Playful', hint: 'Bouncy, confetti, more energy' },
+  { value: 'minimal', label: 'Minimal', hint: 'Quiet — best for busy photos' },
+];
 
 type PalettePreset = {
   id: string;
@@ -1090,6 +1097,37 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
                                 </div>
                                 <span className="text-xs text-muted-foreground font-mono">{textHex}</span>
                             </div>
+                        </div>
+
+                        <div className="space-y-2 pt-2 border-t">
+                            <Label id="fxStyleLabel" className="text-xs uppercase tracking-wider text-muted-foreground">Card animations</Label>
+                            <div role="radiogroup" aria-labelledby="fxStyleLabel" className="grid gap-2">
+                                {FX_STYLE_OPTIONS.map((option) => {
+                                    const selected = (template.fxStyle ?? 'elegant') === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            role="radio"
+                                            aria-checked={selected}
+                                            onClick={() => handleChange('fxStyle', option.value)}
+                                            className={
+                                                'flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-all ' +
+                                                (selected
+                                                  ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                                                  : 'bg-white hover:bg-secondary hover:border-secondary-foreground/20')
+                                            }
+                                        >
+                                            <span className="min-w-0">
+                                                <span className="block text-sm font-medium">{option.label}</span>
+                                                <span className="block text-xs text-muted-foreground">{option.hint}</span>
+                                            </span>
+                                            {selected && <CheckIcon size={16} className="shrink-0 text-primary" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Applies to the customer&apos;s card, including cards already issued.</p>
                         </div>
 
                     </AccordionContent>
