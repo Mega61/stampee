@@ -157,6 +157,42 @@ gsutil cors get gs://gbs-apps-media   # verify
 Use your own `SPA_ORIGIN` and bucket name (add `http://localhost:3000` to
 `origin` to test sampling against the real bucket from a dev server).
 
+## Google Wallet setup
+
+Clients can save their card to Google Wallet, and the pass's stamp count
+updates whenever the card changes (docs/CARD_ENGAGEMENT_PLAN.md §7.3). It is
+off until the three `GOOGLE_WALLET_*` credentials below are set: the public
+card asks `GET /public/wallet/config` and shows no button while it says
+`{ google: false }`.
+
+1. **Issuer account.** In the [Google Pay & Wallet Console](https://pay.google.com/business/console)
+   create a business profile and open **Google Wallet API**. Note the
+   **Issuer ID** (a long number) → `GOOGLE_WALLET_ISSUER_ID`.
+2. **Service account.** In a Google Cloud project, enable the *Google Wallet
+   API* (`walletobjects.googleapis.com`) and create a service account (e.g.
+   `wallet-issuer@<project>.iam.gserviceaccount.com`) → `GOOGLE_WALLET_SA_EMAIL`.
+   It needs no IAM role in the project.
+3. **Grant it access.** Back in the Wallet console → *Users*, invite the
+   service-account email with the **Developer** role, so it can create and
+   update classes/objects for this issuer.
+4. **Key.** Create a JSON key for that service account and copy its
+   `private_key` (the `-----BEGIN PRIVATE KEY-----…` PEM) into
+   `GOOGLE_WALLET_SA_KEY`. One line with `\n` escapes is fine; quote it. The
+   key is needed to sign the "save" link. Note: the org policy
+   `iam.disableServiceAccountKeyCreation` blocks key creation in `gbs-infra`,
+   so create this service account in a project with an exception to it.
+5. **Optional:** `GOOGLE_WALLET_CLASS_PREFIX` (default `stampee`) namespaces
+   class/object ids — use a different one for staging if it shares the issuer.
+6. Restart the API. Until Google approves the issuer for production, only
+   accounts added as testers in the console can save passes ("demo mode").
+
+What gets created: one *LoyaltyClass* per campaign (business name, campaign
+name, logo from `/public/brand/<slug>/icon-512.png`, card color) and one
+*LoyaltyObject* per card, created the first time the client taps the button.
+Stamp changes (`PATCH /cards/:id`, transactions, gift stamps, game wins) patch
+the object about a second later; failures are logged, never shown to staff.
+Google must be able to fetch the logo, so `API_PUBLIC_URL` must be public.
+
 ## Adding Strapi later
 
 Strapi is intentionally not in `docker-compose.yml`. When you wire it in:
