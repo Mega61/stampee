@@ -225,7 +225,7 @@ nothing matches — not a 404); `/customers/:id/loyalty` returns one object.
       "totalStamps": 10,
       "stampsRemaining": 5,
       "readyToRedeem": false,
-      "giftedStamps": { "welcome": 2, "winBack": 2 },
+      "giftedStamps": { "welcome": 2, "winBack": 2, "game": 0 },
       "stampsFromVisits": 1,
       "issuedAt": "2026-10-01T15:04:05.000Z",
       "lastVisitAt": "2026-10-12T16:20:00.000Z",
@@ -239,7 +239,8 @@ nothing matches — not a 404); `/customers/:id/loyalty` returns one object.
 
 - `stamps` / `totalStamps` are exactly what the client sees on their card.
 - `giftedStamps.welcome` = pre-stamped at issue by the campaign;
-  `giftedStamps.winBack` = added later as a win-back gift. Neither is a visit;
+  `giftedStamps.winBack` = added later as a win-back gift;
+  `giftedStamps.game` = won in the weekly scratch game. None of them is a visit;
   `stampsFromVisits` is the part earned by coming in.
 - `lastVisitAt` = last real stamp (visit); `lastActivityAt` includes gifts,
   redemptions and issuing.
