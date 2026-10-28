@@ -212,7 +212,7 @@ export const playGame = async (
   const outcome = await playGameTx(db, ownerId, uniqueId, now);
   if (!outcome.ok) return outcome;
   // After commit: a new win changed the card (Wallet pass sync etc.).
-  if (outcome.fresh && outcome.result.won) onCardChanged(outcome.cardId);
+  if (outcome.fresh && outcome.result.won) onCardChanged(outcome.cardId, 'bonus');
   return { ok: true, result: outcome.result };
 };
 

@@ -93,6 +93,12 @@ export const nextWeekStart = (date: Date, timeZone = GAME_TIME_ZONE): Date => {
   return zonedMidnight(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate(), timeZone);
 };
 
+/** Local weekday (0 = Monday … 6 = Sunday), hour and minute of `date` in `timeZone`. */
+export const localWeekTime = (date: Date, timeZone = GAME_TIME_ZONE) => {
+  const w = wallClock(date, timeZone);
+  return { weekday: isoWeekday(new Date(Date.UTC(w.year, w.month - 1, w.day))), hour: w.hour, minute: w.minute };
+};
+
 /** First day of `date`'s local month at 00:00 local time. */
 export const monthStart = (date: Date, timeZone = GAME_TIME_ZONE): Date => {
   const w = wallClock(date, timeZone);

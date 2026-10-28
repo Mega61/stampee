@@ -151,18 +151,8 @@ export const formatShortDate = (timestamp: number | null) =>
     ? '—'
     : new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
-/**
- * Best-effort WhatsApp link. Colombian mobiles are stored as 10 digits starting
- * with 3, so those get the +57 prefix; anything else is used as-is.
- */
-export const buildWhatsAppUrl = (mobile?: string, text?: string) => {
-  const digits = (mobile ?? '').replace(/\D+/g, '');
-  if (digits.length < 7) return null;
-  const international = digits.length === 10 && digits.startsWith('3') ? `57${digits}` : digits;
-  const query = text ? `&text=${encodeURIComponent(text)}` : '';
-  // Not wa.me: its redirect mangles emoji into U+FFFD.
-  return `https://api.whatsapp.com/send?phone=${international}${query}`;
-};
+// Best-effort WhatsApp link (Colombian 10-digit mobiles get +57): lib/whatsapp.ts.
+export { buildWhatsAppUrl } from './whatsapp';
 
 export const downloadCsv = (filename: string, rows: (string | number)[][]) => {
   const escape = (value: string | number) => {

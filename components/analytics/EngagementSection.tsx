@@ -9,6 +9,7 @@ import {
   Minus,
   Repeat,
   Timer,
+  WalletCards,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -198,6 +199,36 @@ const SourceMix: React.FC<{ sources: EngagementReport["sources"] }> = ({ sources
     </div>
   );
 };
+
+// ---------- wallet passes ----------
+
+const WALLETS: { key: "google" | "apple"; label: string }[] = [
+  { key: "google", label: "Google Wallet" },
+  { key: "apple", label: "Apple Wallet" },
+];
+
+const WalletPasses: React.FC<{ passes: NonNullable<EngagementReport["walletPasses"]> }> = ({ passes }) => (
+  <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    {WALLETS.map((w) => {
+      const s = passes[w.key];
+      return (
+        <li key={w.key} className="rounded-lg border border-border/70 bg-background/60 p-4">
+          <p className="text-sm text-muted-foreground">{w.label}</p>
+          <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">{formatNumber(s.current)}</p>
+          <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              <span className="font-medium text-emerald-700 tabular-nums">+{formatNumber(s.added)}</span> added
+            </span>
+            <span>
+              <span className="font-medium text-rose-700 tabular-nums">−{formatNumber(s.removed)}</span> removed
+            </span>
+            <span>in range</span>
+          </p>
+        </li>
+      );
+    })}
+  </ul>
+);
 
 // ---------- experiment ----------
 
@@ -402,6 +433,23 @@ export const EngagementSection: React.FC<{ from: string; to: string }> = ({ from
               </CardContent>
             </Card>
           </div>
+
+          {report.walletPasses && (
+            <Card className="border-border/80 bg-card shadow-subtle">
+              <SectionTitle
+                title="Passes in Wallet"
+                sub="Loyalty cards clients keep in Google or Apple Wallet right now, and how many were added or removed in this range."
+                action={
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70">
+                    <WalletCards className="h-4 w-4 text-foreground/70" />
+                  </span>
+                }
+              />
+              <CardContent className="pt-4">
+                <WalletPasses passes={report.walletPasses} />
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="border-border/80 bg-card shadow-subtle">
             <SectionTitle

@@ -8,7 +8,8 @@ import { Template, Transaction } from '../types';
 import { cn, resolveHexAndOpacity, hexToRgba, getBonusStamps } from '../lib/utils';
 import { getLateGiftStamps, getStampSizing, isGiftedSlot, type StampSizing } from '../lib/card/stampLayout';
 import { QrCode, History, Gift, Plus, X, Minus, CreditCard, Globe, Sparkles } from 'lucide-react';
-import { siFacebook, siInstagram, siTiktok, siX, siYoutube } from 'simple-icons/icons';
+import { siFacebook, siInstagram, siTiktok, siWhatsapp, siX, siYoutube } from 'simple-icons/icons';
+import { buildBookingWhatsAppUrl } from '../lib/whatsapp';
 
 const LottiePlayer = lazy(() => import('lottie-react'));
 
@@ -123,7 +124,9 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
   // Win-back and game stamps sit on top of earned stamps, so mark the most recent ones.
   const lateGiftStamps = getLateGiftStamps(history, stamps, bonusStamps);
 
+  // Phone, maps and hours are business contact for the wallet passes, not icons.
   const orderedSocial = [
+    'whatsapp',
     'tiktok',
     'youtube',
     'x',
@@ -134,13 +137,16 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
 
   const orderedEntries = orderedSocial
     .map((key) => [key, template.social?.[key]] as const)
-    .filter(([, value]) => !!value) as Array<[string, string]>;
+    // A WhatsApp entry needs a usable number.
+    .filter(([key, value]) => !!value && (key !== 'whatsapp' || !!buildBookingWhatsAppUrl(value))) as Array<[string, string]>;
 
   const normalizeSocialUrl = (platform: string, value: string) => {
     const trimmed = value.trim();
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
     const handle = trimmed.startsWith('@') ? trimmed.slice(1) : trimmed;
     switch (platform) {
+      case 'whatsapp':
+        return buildBookingWhatsAppUrl(trimmed) ?? '';
       case 'instagram':
         return `https://instagram.com/${handle}`;
       case 'facebook':
@@ -166,6 +172,8 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
 
   const getSocialIcon = (platform: string) => {
     switch (platform) {
+      case 'whatsapp':
+        return (props: React.SVGProps<SVGSVGElement>) => <SimpleIcon icon={siWhatsapp} {...props} />;
       case 'instagram':
         return (props: React.SVGProps<SVGSVGElement>) => <SimpleIcon icon={siInstagram} {...props} />;
       case 'facebook':
@@ -578,7 +586,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                 {orderedEntries.map(([platform, value]) => {
                   const IconEl = getSocialIcon(platform);
                   const href = normalizeSocialUrl(platform, value as string);
-                  const label = `${platform}: ${value}`;
+                  const label = platform === 'whatsapp' ? 'Agendar por WhatsApp' : `${platform}: ${value}`;
                   return (
                     <a
                       key={platform}

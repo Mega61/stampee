@@ -160,7 +160,15 @@ describe('Google Wallet: configured', () => {
       state: 'ACTIVE',
       accountName: 'Ana',
       loyaltyPoints: { label: 'Sellos', balance: { string: '4/10' } },
-      barcode: { type: 'QR_CODE', value: `http://localhost:3000/golden-beauty/scan/${card.uniqueId}` },
+      textModulesData: [
+        { id: 'progress', header: 'Tu recompensa', body: 'Te faltan 6 sellos para tu premio' },
+        { id: 'level', header: 'Tu nivel', body: 'Bronce' },
+      ],
+      barcode: {
+        type: 'QR_CODE',
+        value: `http://localhost:3000/golden-beauty/scan/${card.uniqueId}`,
+        alternateText: card.uniqueId.replace(/-/g, '').slice(-6).toUpperCase(),
+      },
       linksModuleData: {
         uris: [
           { id: 'card', uri: `http://localhost:3000/golden-beauty/${card.uniqueId}?src=wallet`, description: 'Ver mi tarjeta' },

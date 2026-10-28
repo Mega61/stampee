@@ -191,7 +191,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
         actor_role: claims.role,
       })
       .execute();
-    onCardChanged(req.params.id);
+    onCardChanged(req.params.id, body.type === 'stamp_add' ? 'stamp' : 'other');
     const row = await db
       .selectFrom('transactions')
       .selectAll()
@@ -289,7 +289,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
       }
       return out;
     });
-    for (const r of results) if (r.added > 0) onCardChanged(r.cardId);
+    for (const r of results) if (r.added > 0) onCardChanged(r.cardId, 'gift', r.added);
 
     return {
       ok: true,

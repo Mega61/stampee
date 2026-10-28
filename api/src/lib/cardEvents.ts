@@ -2,12 +2,20 @@
 // card's stamps or status is committed (stamp add/remove, redeem, gift, game
 // win). It must never block or fail the caller's response.
 //
+// Pass the cause when the caller knows it: it decides the pass notification
+// (lib/wallet/passContent.ts planNotifications). 'stamp' rings the balance,
+// 'gift' sends the "te regaló" message, 'bonus' (game win) updates silently.
+// Causes collected during the debounce window are merged.
+//
 // Listeners: the Google Wallet sync (lib/wallet/google.ts) and the Apple
 // Wallet notifier (lib/wallet/apple.ts: bump the pass, push its devices). They
 // run independently: one failing never skips the other. Calls are debounced per card: the kiosk stamps with PATCH /cards/:id and
 // POST /cards/:id/transactions back to back, which should become one update.
 import { isGoogleWalletEnabled, syncGooglePass } from './wallet/google.js';
 import { isAppleWalletEnabled, notifyApplePass } from './wallet/apple.js';
+import { noChanges, type CardChangeCause, type CardChanges } from './wallet/passContent.js';
+
+export type { CardChangeCause };
 
 export const CARD_EVENT_DEBOUNCE_MS = 1000;
 
@@ -27,18 +35,21 @@ export const setCardEventsLogger = (next: Logger | null): void => {
 };
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingChanges = new Map<string, CardChanges>();
 const inFlight = new Set<Promise<void>>();
 
 const run = (cardId: string) => {
   timers.delete(cardId);
+  const changes = pendingChanges.get(cardId) ?? noChanges();
+  pendingChanges.delete(cardId);
   const task = (async () => {
     try {
-      await syncGooglePass(cardId);
+      await syncGooglePass(cardId, changes);
     } catch (err) {
       logger.error({ err, cardId }, 'wallet sync failed');
     }
     try {
-      const result = await notifyApplePass(cardId);
+      const result = await notifyApplePass(cardId, changes);
       // 410 (device gone) is handled there; anything else is worth a log.
       const failed = result?.pushed.filter((r) => r.status !== 200 && r.status !== 410) ?? [];
       if (failed.length) {
@@ -55,9 +66,13 @@ const run = (cardId: string) => {
   void task.finally(() => inFlight.delete(task));
 };
 
-export const onCardChanged = (cardId: string): void => {
+export const onCardChanged = (cardId: string, cause?: CardChangeCause, amount = 0): void => {
   try {
     if (!cardId || !(isGoogleWalletEnabled() || isAppleWalletEnabled())) return;
+    const changes = pendingChanges.get(cardId) ?? noChanges();
+    if (cause) changes.causes.add(cause);
+    if (cause === 'gift') changes.giftedStamps += Math.max(0, amount);
+    pendingChanges.set(cardId, changes);
     const pending = timers.get(cardId);
     if (pending) clearTimeout(pending);
     const timer = setTimeout(() => run(cardId), CARD_EVENT_DEBOUNCE_MS);

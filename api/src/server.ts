@@ -27,6 +27,7 @@ import { publicPwaRoutes } from './routes/publicPwa.js';
 import { publicGameRoutes } from './routes/publicGame.js';
 import { walletRoutes } from './routes/wallet.js';
 import { appleWalletRoutes } from './routes/appleWallet.js';
+import { startWalletScheduler } from './lib/wallet/scheduler.js';
 
 export const buildApp = async () => {
   const app = Fastify({
@@ -126,6 +127,9 @@ const start = async () => {
     await pool.query('select 1');
     app.log.info('Postgres connection OK');
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
+    // Weekly wallet reminders (lib/wallet/scheduler.ts). Not under tests:
+    // they drive runWeeklyGameReminders directly with a fixed clock.
+    if (env.NODE_ENV !== 'test' && !process.env.VITEST) startWalletScheduler(app.log);
   } catch (err) {
     app.log.fatal(err);
     process.exit(1);

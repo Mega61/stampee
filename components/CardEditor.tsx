@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FxStyle, Template } from '../types';
+import { FxStyle, SocialLinks, Template } from '../types';
 import { LoyaltyCard } from './LoyaltyCard';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -513,7 +513,7 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
     }));
   };
 
-  const handleSocialChange = (field: 'instagram' | 'facebook' | 'tiktok' | 'x' | 'youtube' | 'website', value: string) => {
+  const handleSocialChange = (field: keyof SocialLinks, value: string) => {
     const trimmed = value.trim();
     setTemplate(prev => ({
       ...prev,
@@ -1349,6 +1349,55 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
                                 value={template.social?.website || ''}
                                 onChange={(e) => handleSocialChange('website', e.target.value)}
                                 placeholder="https://yourbrand.com"
+                            />
+                        </div>
+
+                        <div className="space-y-1 border-t pt-4">
+                            <p className="text-sm font-medium">Business contact</p>
+                            <p className="text-xs text-muted-foreground">
+                                WhatsApp shows as an icon on the card. All four appear on clients' Google and Apple Wallet passes.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="social-whatsapp">WhatsApp</Label>
+                            <Input
+                                id="social-whatsapp"
+                                type="tel"
+                                inputMode="tel"
+                                value={template.social?.whatsapp || ''}
+                                onChange={(e) => handleSocialChange('whatsapp', e.target.value)}
+                                placeholder="+57 301 464 8943"
+                            />
+                            <p className="text-xs text-muted-foreground">Clients tap it to book: "Hola. Quiero agendar!"</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="social-phone">Phone</Label>
+                            <Input
+                                id="social-phone"
+                                type="tel"
+                                inputMode="tel"
+                                value={template.social?.phone || ''}
+                                onChange={(e) => handleSocialChange('phone', e.target.value)}
+                                placeholder="Same as WhatsApp if empty"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="social-maps">Google Maps link</Label>
+                            <Input
+                                id="social-maps"
+                                type="url"
+                                value={template.social?.mapsUrl || ''}
+                                onChange={(e) => handleSocialChange('mapsUrl', e.target.value)}
+                                placeholder="https://www.google.com/maps/…"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="social-hours">Opening hours</Label>
+                            <Input
+                                id="social-hours"
+                                value={template.social?.hours || ''}
+                                onChange={(e) => handleSocialChange('hours', e.target.value)}
+                                placeholder="Lun–Sáb 13:00–19:00 · Domingos y festivos cerrado"
                             />
                         </div>
                     </AccordionContent>

@@ -7,6 +7,14 @@
 //     (routes/appleWallet.ts). When a card changes, onCardChanged bumps the
 //     pass's `updated_at` and sends an empty APNs push to every registered
 //     device; Wallet then asks which passes changed and downloads them again.
+//   - Same content as the Google pass (google.ts): strip image from the
+//     campaign background, client level, "Te faltan…", lucky stamps, and back
+//     fields with the business's WhatsApp / maps / call links and hours.
+//   - Notifications: Wallet shows a field's `changeMessage` when its value
+//     changes. The stamps field carries one only when the last sync decided
+//     to ring (game wins update silently), and the "Novedades" back field is
+//     our addMessage: its value is the latest message and its changeMessage
+//     is just `%@`. Same budget and priorities as Google (notifyBudget.ts).
 //
 // Env-gated: with no APPLE_* credentials `appleWalletConfig()` is null and
 // nothing here signs or touches the network. Tests install a config and a fake
@@ -20,8 +28,23 @@ import { db } from '../../db/kysely.js';
 import { normalizeSlug } from '../slug.js';
 import { generateToken } from '../tokens.js';
 import { UUID_RE } from '../uniqueId.js';
-import { cachedLogo, renderIcon } from '../../routes/publicPwa.js';
+import { cachedImage, cachedLogo, renderCover, renderIcon } from '../../routes/publicPwa.js';
+import type { ClientLevel } from '../../db/types.js';
 import { firstHex, firstName } from './google.js';
+import {
+  contactFrom,
+  contactLinks,
+  levelFor,
+  levelLabel,
+  messageFor,
+  noChanges,
+  planNotifications,
+  progressText,
+  type BusinessContact,
+  type CardChanges,
+  type WalletMessage,
+} from './passContent.js';
+import { claimNotification } from './notifyBudget.js';
 
 const APNS_TIMEOUT_MS = 10_000;
 const DEFAULT_BG = '#ffffff';
@@ -119,7 +142,24 @@ export interface ApplePassData {
   label: string;
   /** Campaign logo reference (bucket path or URL), if any. */
   logoRef: string | null;
+  /** Campaign background image reference (strip image), if any. */
+  stripRef: string | null;
+  contact: BusinessContact;
+  visits: number;
+  level: ClientLevel;
+  luckyStamps: number;
 }
+
+/** Per-pass rendering state stored on wallet_passes (0017). */
+export interface ApplePassExtras {
+  /** Carry the stamps field's changeMessage (false after a silent update). */
+  stampsNotify: boolean;
+  /** Latest "Novedades" message, if any. */
+  news: string | null;
+  newsNotify: boolean;
+}
+
+const NO_EXTRAS: ApplePassExtras = { stampsNotify: true, news: null, newsNotify: false };
 
 const luminance = (hex: string) => {
   const n = parseInt(hex.slice(1), 16);
@@ -136,7 +176,19 @@ export const rgb = (hex: string) => {
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
 };
 
-export const buildPassJson = (config: AppleWalletConfig, data: ApplePassData, authToken: string) => {
+const link = (key: string, label: string, uri: string, text: string) => ({
+  key,
+  label,
+  value: uri,
+  attributedValue: `<a href="${uri}">${text}</a>`,
+});
+
+export const buildPassJson = (
+  config: AppleWalletConfig,
+  data: ApplePassData,
+  authToken: string,
+  extras: ApplePassExtras = NO_EXTRAS,
+) => {
   const app = trimSlash(config.appPublicUrl);
   const slug = encodeURIComponent(data.slug);
   const uid = encodeURIComponent(data.uniqueId);
@@ -167,20 +219,27 @@ export const buildPassJson = (config: AppleWalletConfig, data: ApplePassData, au
           label: 'Sellos',
           value: `${Math.max(0, data.stamps)}/${data.totalStamps}`,
           // Shown as a lock-screen notification when the value changes.
-          changeMessage: 'Ahora tienes %@ sellos',
+          ...(extras.stampsNotify ? { changeMessage: 'Ahora tienes %@ sellos' } : {}),
         },
       ],
       secondaryFields: [
-        ...(data.rewardName.trim() ? [{ key: 'reward', label: 'Recompensa', value: data.rewardName.trim() }] : []),
         ...(customer ? [{ key: 'customer', label: 'Cliente', value: customer }] : []),
+        { key: 'level', label: 'Nivel', value: levelLabel(data.level) },
+        ...(data.luckyStamps > 0 ? [{ key: 'lucky', label: 'De la suerte', value: String(data.luckyStamps) }] : []),
+      ],
+      auxiliaryFields: [
+        { key: 'progress', label: 'Tu recompensa', value: progressText(data.stamps, data.totalStamps, data.rewardName) },
       ],
       backFields: [
-        {
-          key: 'card',
-          label: 'Tu tarjeta',
-          value: cardUrl,
-          attributedValue: `<a href="${cardUrl}">Ver mi tarjeta</a>`,
-        },
+        ...(extras.news
+          ? [{ key: 'news', label: 'Novedades', value: extras.news, ...(extras.newsNotify ? { changeMessage: '%@' } : {}) }]
+          : []),
+        link('card', 'Tu tarjeta', cardUrl, 'Ver mi tarjeta'),
+        ...contactLinks(data.contact).map((l) =>
+          link(l.id, l.id === 'call' ? 'Teléfono' : l.description, l.uri, l.id === 'call' ? l.uri.slice(4) : l.description),
+        ),
+        ...(data.contact.hours ? [{ key: 'hours', label: 'Horario', value: data.contact.hours }] : []),
+        ...(data.rewardName.trim() ? [{ key: 'reward', label: 'Recompensa', value: data.rewardName.trim() }] : []),
         { key: 'business', label: 'Negocio', value: business },
       ],
     },
@@ -200,12 +259,18 @@ const IMAGE_SIZES: Record<string, number> = {
   'logo.png': 50,
   'logo@2x.png': 100,
 };
+// storeCard strip: 375×123 pt, behind the primary field.
+const STRIP_SIZES: Record<string, [number, number]> = {
+  'strip.png': [375, 123],
+  'strip@2x.png': [750, 246],
+  'strip@3x.png': [1125, 369],
+};
 const IMAGE_CACHE_MAX = 32;
 const IMAGE_CACHE_TTL_MS = 10 * 60 * 1000;
 const imageCache = new Map<string, { at: number; files: Record<string, Buffer> }>();
 
 const passImages = async (data: ApplePassData): Promise<Record<string, Buffer>> => {
-  const key = [data.ownerId, data.background, data.logoRef ?? '', data.businessName].join('|');
+  const key = [data.ownerId, data.background, data.logoRef ?? '', data.stripRef ?? '', data.businessName].join('|');
   const hit = imageCache.get(key);
   if (hit && Date.now() - hit.at < IMAGE_CACHE_TTL_MS) return hit.files;
 
@@ -216,9 +281,17 @@ const passImages = async (data: ApplePassData): Promise<Record<string, Buffer>> 
       return [name, png] as const;
     }),
   );
-  const files = Object.fromEntries(entries);
-  // Don't pin a transient logo-fetch failure in the cache.
-  if (!data.logoRef || logo) {
+  const files: Record<string, Buffer> = Object.fromEntries(entries);
+  const strip = data.stripRef ? await cachedImage(data.ownerId, data.stripRef) : null;
+  if (strip) {
+    try {
+      for (const [name, [w, h]] of Object.entries(STRIP_SIZES)) files[name] = await renderCover(strip, w, h, 'png');
+    } catch {
+      // Unreadable background: a pass without a strip is still a fine pass.
+    }
+  }
+  // Don't pin a transient image-fetch failure in the cache.
+  if ((!data.logoRef || logo) && (!data.stripRef || strip)) {
     imageCache.delete(key);
     imageCache.set(key, { at: Date.now(), files });
     if (imageCache.size > IMAGE_CACHE_MAX) imageCache.delete(imageCache.keys().next().value!);
@@ -227,10 +300,15 @@ const passImages = async (data: ApplePassData): Promise<Record<string, Buffer>> 
 };
 
 /** The signed `.pkpass` (zip: pass.json, images, manifest.json, signature). */
-export const buildPkpass = async (config: AppleWalletConfig, data: ApplePassData, authToken: string): Promise<Buffer> => {
+export const buildPkpass = async (
+  config: AppleWalletConfig,
+  data: ApplePassData,
+  authToken: string,
+  extras: ApplePassExtras = NO_EXTRAS,
+): Promise<Buffer> => {
   const images = await passImages(data);
   const pass = new PKPass(
-    { 'pass.json': Buffer.from(JSON.stringify(buildPassJson(config, data, authToken))), ...images },
+    { 'pass.json': Buffer.from(JSON.stringify(buildPassJson(config, data, authToken, extras))), ...images },
     {
       wwdr: config.wwdr,
       signerCert: config.signerCert,
@@ -267,6 +345,22 @@ const cardPassQuery = () =>
       'campaigns.total_stamps as campaignTotal',
       'campaigns.colors as campaignColors',
       'campaigns.logo_image as campaignLogo',
+      'campaigns.background_image as campaignBackground',
+      'campaigns.social as campaignSocial',
+      'issued_cards.campaign_id as campaignId',
+    ])
+    // Same extras as the Google pass (google.ts cardPassQuery).
+    .select([
+      sql<string>`(
+        select count(*) from loyalty.transactions t
+        join loyalty.issued_cards c on c.id = t.card_id
+        where c.customer_id = issued_cards.customer_id and c.owner_id = issued_cards.owner_id
+          and t.type = 'stamp_add'
+      )`.as('visits'),
+      sql<string>`(
+        select coalesce(sum(t.amount), 0) from loyalty.transactions t
+        where t.card_id = issued_cards.id and t.type = 'bonus'
+      )`.as('lucky'),
     ])
     .where('profiles.role', '=', 'owner');
 
@@ -302,6 +396,11 @@ export const toApplePassData = (row: CardPassRow): ApplePassData => {
     foreground,
     label: color('muted') ?? foreground,
     logoRef: row.campaignLogo ?? (str(snapshot['logoImage']) || null),
+    stripRef: row.campaignId ? row.campaignBackground || null : str(snapshot['backgroundImage']) || null,
+    contact: contactFrom(row.campaignId ? row.campaignSocial : snapshot['social']),
+    visits: Number(row.visits ?? 0),
+    level: levelFor(Number(row.visits ?? 0)),
+    luckyStamps: Number(row.lucky ?? 0),
   };
 };
 
@@ -318,6 +417,11 @@ const loadByUniqueId = async (uniqueId: string) => {
   return row && row.slug ? toApplePassData(row) : null;
 };
 
+const loadById = async (cardId: string) => {
+  const row = await cardPassQuery().where('issued_cards.id', '=', cardId).executeTakeFirst();
+  return row && row.slug ? toApplePassData(row) : null;
+};
+
 // ---------------------------------------------------------------------------
 // Pass records + auth
 // ---------------------------------------------------------------------------
@@ -331,19 +435,32 @@ const loadByUniqueId = async (uniqueId: string) => {
  * service for this one pass — re-downloading it and (un)registering devices
  * for its pushes — and the card's own unique_id already grants more than that.
  */
-const ensurePassRow = async (cardId: string, serial: string) => {
+const ensurePassRow = async (cardId: string, serial: string, data: ApplePassData) => {
   const row = await db
     .insertInto('wallet_passes')
-    .values({ card_id: cardId, provider: 'apple', object_id: serial, auth_token: generateToken(32) })
+    .values({
+      card_id: cardId,
+      provider: 'apple',
+      object_id: serial,
+      auth_token: generateToken(32),
+      synced_stamps: data.stamps,
+      synced_level: data.level,
+    })
     .onConflict((oc) =>
       oc.columns(['card_id', 'provider']).doUpdateSet({
         object_id: serial,
         auth_token: sql<string>`coalesce(wallet_passes.auth_token, excluded.auth_token)`,
+        synced_stamps: data.stamps,
+        synced_level: data.level,
       }),
     )
-    .returning(['auth_token', 'updated_at'])
+    .returning(['auth_token', 'updated_at', 'stamps_notify', 'news', 'news_notify'])
     .executeTakeFirstOrThrow();
-  return { authToken: row.auth_token!, updatedAt: row.updated_at };
+  return {
+    authToken: row.auth_token!,
+    updatedAt: row.updated_at,
+    extras: { stampsNotify: row.stamps_notify, news: row.news, newsNotify: row.news_notify },
+  };
 };
 
 /** Constant-time check of an `Authorization: ApplePass <token>` header. */
@@ -359,6 +476,7 @@ export interface StoredApplePass {
   serial: string;
   authToken: string | null;
   updatedAt: Date;
+  extras: ApplePassExtras;
 }
 
 /** The Apple pass row for a serial number, or null. */
@@ -366,11 +484,19 @@ export const findApplePass = async (serial: string): Promise<StoredApplePass | n
   if (!UUID_RE.test(serial)) return null;
   const row = await db
     .selectFrom('wallet_passes')
-    .select(['card_id', 'object_id', 'auth_token', 'updated_at'])
+    .select(['card_id', 'object_id', 'auth_token', 'updated_at', 'stamps_notify', 'news', 'news_notify'])
     .where('provider', '=', 'apple')
     .where('object_id', '=', serial)
     .executeTakeFirst();
-  return row ? { cardId: row.card_id, serial: row.object_id, authToken: row.auth_token, updatedAt: row.updated_at } : null;
+  return row
+    ? {
+        cardId: row.card_id,
+        serial: row.object_id,
+        authToken: row.auth_token,
+        updatedAt: row.updated_at,
+        extras: { stampsNotify: row.stamps_notify, news: row.news, newsNotify: row.news_notify },
+      }
+    : null;
 };
 
 // ---------------------------------------------------------------------------
@@ -387,8 +513,8 @@ export const issueApplePass = async (slug: string, uniqueId: string): Promise<Bu
   if (!config) return null;
   const data = await loadByPublicId(slug, uniqueId);
   if (!data) return null;
-  const { authToken } = await ensurePassRow(data.cardId, data.uniqueId);
-  return buildPkpass(config, data, authToken);
+  const { authToken, extras } = await ensurePassRow(data.cardId, data.uniqueId, data);
+  return buildPkpass(config, data, authToken, extras);
 };
 
 /** The latest bundle for an existing pass (PassKit web service). */
@@ -397,7 +523,7 @@ export const renderStoredPass = async (pass: StoredApplePass): Promise<Buffer | 
   if (!config || !pass.authToken) return null;
   const data = await loadByUniqueId(pass.serial);
   if (!data) return null;
-  return buildPkpass(config, data, pass.authToken);
+  return buildPkpass(config, data, pass.authToken, pass.extras);
 };
 
 /** `passesUpdatedSince` tags: microseconds since epoch of updated_at, as text. */
@@ -444,13 +570,15 @@ export const registerDevice = async (params: {
   return rows[0]?.inserted === true;
 };
 
+/** Drops a device registration. True when one existed. */
 export const unregisterDevice = async (params: { deviceLibraryId: string; passTypeId: string; serial: string }) => {
-  await db
+  const result = await db
     .deleteFrom('wallet_devices')
     .where('device_library_id', '=', params.deviceLibraryId)
     .where('pass_type_id', '=', params.passTypeId)
     .where('serial', '=', params.serial)
-    .execute();
+    .executeTakeFirst();
+  return Number(result.numDeletedRows) > 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -543,29 +671,20 @@ export interface NotifyResult {
   unregistered: number;
 }
 
-/**
- * Marks the card's Apple pass as changed and pushes every registered device.
- * Null when Apple Wallet is off or the card has no Apple pass.
- */
-export const notifyApplePass = async (cardId: string): Promise<NotifyResult | null> => {
-  const config = appleWalletConfig();
-  if (!config) return null;
-  // Last-Modified has 1 s resolution: always move to a later second, so two
-  // changes within one second never look unmodified to If-Modified-Since.
-  const pass = await db
-    .updateTable('wallet_passes')
-    .set({ updated_at: sql<Date>`greatest(now(), date_trunc('second', updated_at) + interval '1 second')` })
-    .where('card_id', '=', cardId)
-    .where('provider', '=', 'apple')
-    .returning('object_id')
-    .executeTakeFirst();
-  if (!pass) return null;
+/** "Novedades" value for a message. Wallet only notifies when the value changes. */
+export const newsValue = (message: WalletMessage, previous: string | null) => {
+  const value = `${message.header} ${message.body}`;
+  // Same text as last time (the weekly game): an invisible toggle keeps it a change.
+  return value === previous ? `${value}​` : value;
+};
 
+/** Pushes every device registered for a pass. */
+const pushDevices = async (config: AppleWalletConfig, serial: string): Promise<NotifyResult> => {
   const devices = await db
     .selectFrom('wallet_devices')
     .select(['device_library_id', 'push_token'])
     .where('pass_type_id', '=', config.passTypeId)
-    .where('serial', '=', pass.object_id)
+    .where('serial', '=', serial)
     .execute();
   if (!devices.length) return { pushed: [], unregistered: 0 };
 
@@ -581,10 +700,93 @@ export const notifyApplePass = async (cardId: string): Promise<NotifyResult | nu
     const deleted = await db
       .deleteFrom('wallet_devices')
       .where('pass_type_id', '=', config.passTypeId)
-      .where('serial', '=', pass.object_id)
+      .where('serial', '=', serial)
       .where('push_token', 'in', gone)
       .executeTakeFirst();
     unregistered = Number(deleted.numDeletedRows);
   }
   return { pushed, unregistered };
+};
+
+// Last-Modified has 1 s resolution: always move to a later second, so two
+// changes within one second never look unmodified to If-Modified-Since.
+const bumpUpdatedAt = sql<Date>`greatest(now(), date_trunc('second', updated_at) + interval '1 second')`;
+
+/**
+ * Marks the card's Apple pass as changed and pushes every registered device.
+ * Decides the notification like the Google sync (one per change, budgeted).
+ * Null when Apple Wallet is off or the card has no Apple pass.
+ */
+export const notifyApplePass = async (cardId: string, changes: CardChanges = noChanges()): Promise<NotifyResult | null> => {
+  const config = appleWalletConfig();
+  if (!config) return null;
+  const current = await db
+    .selectFrom('wallet_passes')
+    .select(['object_id', 'synced_stamps', 'synced_level', 'news'])
+    .where('card_id', '=', cardId)
+    .where('provider', '=', 'apple')
+    .executeTakeFirst();
+  if (!current) return null;
+  const data = await loadById(cardId);
+
+  let set: Record<string, unknown> = {};
+  if (data) {
+    const [top] = planNotifications(
+      { stamps: current.synced_stamps, level: current.synced_level },
+      { stamps: data.stamps, totalStamps: data.totalStamps, status: data.status, level: data.level },
+      changes,
+    );
+    const claim = top ? await claimNotification({ cardId, provider: 'apple', kind: top.kind }) : null;
+    const notify = claim?.outcome === 'notify';
+    const message = top ? messageFor(top, { rewardName: data.rewardName, businessName: data.businessName }) : null;
+    set = {
+      synced_stamps: data.stamps,
+      synced_level: data.level,
+      stamps_notify: notify && top?.kind === 'stamp',
+      ...(message ? { news: newsValue(message, current.news), news_notify: notify } : {}),
+    };
+  }
+
+  const pass = await db
+    .updateTable('wallet_passes')
+    .set({ ...set, updated_at: bumpUpdatedAt })
+    .where('card_id', '=', cardId)
+    .where('provider', '=', 'apple')
+    .returning('object_id')
+    .executeTakeFirst();
+  if (!pass) return null;
+  return pushDevices(config, pass.object_id);
+};
+
+/**
+ * Weekly game reminder for one Apple pass (scheduler): the "Novedades" field.
+ * Idempotent per `dedupeKey`.
+ */
+export const sendAppleWeeklyGame = async (
+  cardId: string,
+  dedupeKey: string,
+): Promise<'sent' | 'silent' | 'duplicate' | 'gone'> => {
+  const config = appleWalletConfig();
+  if (!config) return 'gone';
+  const claim = await claimNotification({ cardId, provider: 'apple', kind: 'weekly_game', dedupeKey });
+  if (claim.outcome === 'duplicate') return 'duplicate';
+  const notify = claim.outcome === 'notify';
+  const current = await db
+    .selectFrom('wallet_passes')
+    .select('news')
+    .where('card_id', '=', cardId)
+    .where('provider', '=', 'apple')
+    .executeTakeFirst();
+  if (!current) return 'gone';
+  const message = messageFor({ kind: 'weekly_game' }, { rewardName: '', businessName: '' })!;
+  const pass = await db
+    .updateTable('wallet_passes')
+    .set({ news: newsValue(message, current.news), news_notify: notify, stamps_notify: false, updated_at: bumpUpdatedAt })
+    .where('card_id', '=', cardId)
+    .where('provider', '=', 'apple')
+    .returning('object_id')
+    .executeTakeFirst();
+  if (!pass) return 'gone';
+  await pushDevices(config, pass.object_id);
+  return notify ? 'sent' : 'silent';
 };

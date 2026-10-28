@@ -296,7 +296,7 @@ describe('game: play', () => {
     const card = await makeCard({ stamps: 3 });
     await play(card.uniqueId);
     expect(onCardChanged).toHaveBeenCalledTimes(1);
-    expect(onCardChanged).toHaveBeenCalledWith(card.id);
+    expect(onCardChanged).toHaveBeenCalledWith(card.id, 'bonus');
     await play(card.uniqueId);
     expect(onCardChanged).toHaveBeenCalledTimes(1);
 

@@ -25,13 +25,16 @@ rows, weekly game win → bonus transaction → stamp lands.
   whose `cardBucket` ≠ 0 (bucket 0 is the classic-card holdout).
 
 **Owner prerequisites (not code)**
-- Run migrations 0012–0016 on deploy.
+- Run migrations 0012–0017 on deploy.
 - GCS bucket CORS (`infra/README.md`) so uploaded backgrounds can be sampled.
 - Google Wallet: issuer account + service account + env vars
   (`infra/README.md`). Hidden until configured.
 - Apple Wallet: Apple Developer Program, Pass Type ID + certificate, WWDR G4,
   env vars (`infra/README.md` → "Apple Wallet setup"). Hidden until configured;
   migration 0016. Both wallets need the API on public HTTPS.
+- Wallet pass content (§7.3 "Pass upgrades"): fill CardEditor › Social ›
+  Business contact (WhatsApp, phone, Maps link, hours). Existing Google passes
+  pick up the new class (hero, links, callbacks) on their next stamp sync.
 - The game is **off** per campaign until enabled in the editor ("Weekly scratch
   game").
 - Holdout: 10 % of cards see the classic card. After ~6 weeks, read the
@@ -572,6 +575,34 @@ it if Phase 0 shows the manual pings drive opens.
   it fires the wallet update out-of-band (don't block the staff response; log
   failures).
 - New table `wallet_passes (card_id, provider, object_id, created_at, last_synced_at)`.
+
+**Pass upgrades** (migration 0017; `lib/wallet/passContent.ts`,
+`notifyBudget.ts`, `scheduler.ts`, `googleCallback.ts`)
+
+- Class (business-wide): hero = campaign background via
+  `GET /public/brand/:slug/hero.jpg?c=<campaign>` (1032×336 JPEG), contact links
+  (WhatsApp booking, Cómo llegar, Llamar, Instagram), "Horario" text module,
+  `callbackOptions.url = /wallet/google/callback`.
+- Object (per client): stamps, "Sellos de la suerte" (secondaryLoyaltyPoints =
+  game bonus stamps, only when > 0), "Te faltan N…" and "Tu nivel" text modules,
+  barcode `alternateText` = last 6 of the card id. Level: Bronce 0–4, Plata
+  5–14, Oro 15+ visits (stamp_add on all the client's cards). Google has no
+  per-object rewards tier (rewardsTier is class-only), so it's a text module
+  and a level-up notifies by message.
+- Notifications, at most one per sync, budget 3 per pass per 24 h counted in
+  `wallet_notifications`, priority reward ready > stamp > gift > level up >
+  weekly game (gift / level up / weekly never take the last slot). Stamp =
+  balance PATCH with `notifyPreference: NOTIFY_ON_UPDATE`; the others =
+  `addMessage` (TEXT_AND_NOTIFY, or TEXT when over budget). Game wins update
+  silently. Apple: same decisions; the stamps field's changeMessage only when
+  ringing, and a "Novedades" back field (`changeMessage: '%@'`) for messages.
+- Weekly game: Monday 10:00–20:00 Bogota, in-process minute tick
+  (`startWalletScheduler`, not under tests), advisory lock + per-pass
+  `weekly_game:<ISO week>` dedupe keys + `wallet_job_runs`.
+- Save/delete: Google callbacks (ECv2SigningOnly signature verified with
+  node:crypto against Google's published keys, objectId must be a pass we
+  issued) and Apple device register/unregister → `wallet_pass_events`;
+  Analytics › Card engagement › "Passes in Wallet".
 
 **Apple Wallet** (after Google, if Phase 0 shows iOS share justifies it)
 

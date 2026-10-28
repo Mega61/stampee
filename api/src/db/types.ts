@@ -158,6 +158,46 @@ export interface WalletPassesTable {
   // time the pass content last changed (passesUpdatedSince / Last-Modified).
   auth_token: ColumnType<string | null, string | null | undefined, string | null>;
   updated_at: Generated<Date>;
+  // 0017_wallet_extras.sql — what the last sync pushed (change detection),
+  // and Apple-only rendering flags / "Novedades" message.
+  synced_stamps: ColumnType<number | null, number | null | undefined, number | null>;
+  synced_level: ColumnType<ClientLevel | null, ClientLevel | null | undefined, ClientLevel | null>;
+  stamps_notify: ColumnType<boolean, boolean | undefined, boolean>;
+  news: ColumnType<string | null, string | null | undefined, string | null>;
+  news_notify: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+export type ClientLevel = 'bronce' | 'plata' | 'oro';
+export type WalletNotificationKind = 'reward_ready' | 'stamp' | 'gift' | 'level_up' | 'weekly_game';
+
+// 0017_wallet_extras.sql — notification log / per-pass daily budget.
+export interface WalletNotificationsTable {
+  id: Generated<string>;
+  card_id: string;
+  provider: 'google' | 'apple';
+  kind: WalletNotificationKind;
+  notified: boolean;
+  dedupe_key: string | null;
+  message: Record<string, unknown> | null;
+  created_at: Generated<Date>;
+}
+
+// 0017_wallet_extras.sql — finished scheduler runs (idempotency).
+export interface WalletJobRunsTable {
+  job: string;
+  period_key: string;
+  finished_at: Generated<Date>;
+  sent: ColumnType<number, number | undefined, number>;
+}
+
+// 0017_wallet_extras.sql — pass saved to / removed from a wallet.
+export interface WalletPassEventsTable {
+  id: Generated<string>;
+  card_id: string;
+  provider: 'google' | 'apple';
+  event: 'save' | 'delete';
+  nonce: string | null;
+  at: Generated<Date>;
 }
 
 // 0016_apple_wallet.sql — devices registered for Apple pass updates.
@@ -196,4 +236,7 @@ export interface Database {
   wallet_passes: WalletPassesTable;
   wallet_devices: WalletDevicesTable;
   card_plays: CardPlaysTable;
+  wallet_notifications: WalletNotificationsTable;
+  wallet_job_runs: WalletJobRunsTable;
+  wallet_pass_events: WalletPassEventsTable;
 }

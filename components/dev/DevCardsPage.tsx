@@ -8,15 +8,26 @@
 //     &events=stamp,gift               pending moments on load
 //     &game=available|played|locked|disabled|holdout
 //     &redeemed=1  &panel=0 (hide the control panel, for screenshots)
+//     &social=0 (drop the mock business contact / social links)
 import React, { Suspense, lazy, useCallback, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { templates } from '../../data/templates';
-import type { FxStyle, GameState, GameStateKind, IssuedCard, Transaction } from '../../types';
+import type { FxStyle, GameState, GameStateKind, IssuedCard, SocialLinks, Transaction } from '../../types';
 import type { NewStampEvent } from '../../lib/card/types';
 
 const PublicCardView = lazy(() => import('../card/PublicCardView'));
 
 const STYLES: FxStyle[] = ['elegant', 'playful', 'minimal'];
+
+// Golden Beauty Studio's real contact (CardEditor › Social › Business contact).
+const MOCK_SOCIAL: SocialLinks = {
+  instagram: '@goldenbeautystudio',
+  whatsapp: '+57 301 464 8943',
+  phone: '+57 301 464 8943',
+  mapsUrl:
+    'https://www.google.com/maps/search/?api=1&query=Calle%2069%20Sur%20%2343a%20-%2041%2C%20Primer%20Piso%2C%20Sabaneta%20%C2%B7%20Antioquia%20%C2%B7%20Colombia&query_place_id=ChIJWy7PWB-DRo4RatmsIAbFvBU',
+  hours: 'Lun–Sáb 13:00–19:00 · Domingos y festivos cerrado',
+};
 
 const nextMonday = () => {
   const d = new Date();
@@ -75,6 +86,7 @@ const DevCard: React.FC<{ params: URLSearchParams }> = ({ params }) => {
     backgroundImage: params.get('bg') ?? base.backgroundImage,
     backgroundOpacity: params.has('opacity') ? Number(params.get('opacity')) : base.backgroundOpacity,
     gameEnabled: true,
+    social: params.get('social') === '0' ? undefined : { ...base.social, ...MOCK_SOCIAL },
   }), [base, params]);
 
   const initialStamps = Math.min(template.totalStamps, Number(params.get('stamps') ?? 3));
