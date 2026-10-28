@@ -23,6 +23,7 @@ import {
   type AppleWalletConfig,
 } from '../lib/wallet/apple.js';
 import { rejectMalformedUniqueId, UUID_RE } from '../lib/uniqueId.js';
+import { recordPassEvent } from '../lib/wallet/passEvents.js';
 
 const PKPASS_TYPE = 'application/vnd.apple.pkpass';
 // Each download renders images and signs a bundle: keep it tight.
@@ -99,6 +100,9 @@ export const appleWalletRoutes: FastifyPluginAsync = async (app) => {
         serial: pass.serial,
         pushToken,
       });
+      // Registering = the pass was added to a wallet (analytics, like
+      // Google's save callback). Re-registrations aren't new saves.
+      if (created) await recordPassEvent({ cardId: pass.cardId, provider: 'apple', event: 'save' });
       return reply.code(created ? 201 : 200).send();
     },
   );
@@ -111,7 +115,12 @@ export const appleWalletRoutes: FastifyPluginAsync = async (app) => {
       const config = configFor(passTypeIdentifier);
       const pass = await authorizedPass(req, serialNumber);
       if (DEVICE_RE.test(deviceLibraryIdentifier)) {
-        await unregisterDevice({ deviceLibraryId: deviceLibraryIdentifier, passTypeId: config.passTypeId, serial: pass.serial });
+        const removed = await unregisterDevice({
+          deviceLibraryId: deviceLibraryIdentifier,
+          passTypeId: config.passTypeId,
+          serial: pass.serial,
+        });
+        if (removed) await recordPassEvent({ cardId: pass.cardId, provider: 'apple', event: 'delete' });
       }
       return reply.code(200).send();
     },

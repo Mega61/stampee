@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import forge from 'node-forge';
 import sharp from 'sharp';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setupTestDb, type TestDb } from './helpers/db.js';
 import { buildTestRig, insertCampaign, insertCustomer, insertOwner, type TestRig } from './helpers/app.js';
 import type { AppleWalletConfig } from '../src/lib/wallet/apple.js';
@@ -295,15 +295,23 @@ describe('Apple Wallet: pass download', () => {
       { key: 'stamps', label: 'Sellos', value: '4/10', changeMessage: 'Ahora tienes %@ sellos' },
     ]);
     expect(pass.storeCard.secondaryFields).toEqual([
-      { key: 'reward', label: 'Recompensa', value: 'Manicure gratis' },
       { key: 'customer', label: 'Cliente', value: 'Ana' },
+      { key: 'level', label: 'Nivel', value: 'Bronce' },
+    ]);
+    expect(pass.storeCard.auxiliaryFields).toEqual([
+      { key: 'progress', label: 'Tu recompensa', value: 'Te faltan 6 sellos para tu Manicure gratis' },
     ]);
     expect(pass.storeCard.backFields).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: 'card', value: `http://localhost:3000/golden-beauty/${card.uniqueId}?src=wallet` }),
+        expect.objectContaining({ key: 'reward', value: 'Manicure gratis' }),
         expect.objectContaining({ key: 'business', value: 'Golden Beauty' }),
       ]),
     );
+    // No contact info, no background image, no news: none of their fields/images.
+    const backKeys = pass.storeCard.backFields.map((f: { key: string }) => f.key);
+    for (const k of ['news', 'whatsapp', 'maps', 'call', 'hours']) expect(backKeys).not.toContain(k);
+    expect(files['strip.png']).toBeUndefined();
 
     // Images at the sizes Wallet expects.
     for (const [name, size] of [['icon.png', 29], ['icon@2x.png', 58], ['icon@3x.png', 87], ['logo.png', 50], ['logo@2x.png', 100]] as const) {
@@ -574,5 +582,131 @@ describe('Apple Wallet: notifyApplePass', () => {
     expect(apple.isAuthorized('applepass abc123', 'abc123')).toBe(false);
     expect(apple.isAuthorized(undefined, 'abc123')).toBe(false);
     expect(apple.isAuthorized('ApplePass abc123', null)).toBe(false);
+  });
+});
+
+describe('Apple Wallet: pass upgrades', () => {
+  const BG_PATH = '11111111-1111-1111-1111-111111111111/background/44444444-4444-4444-4444-444444444444.jpg';
+  const MAPS = 'https://www.google.com/maps/search/?api=1&query=Calle%2069%20Sur%20%2343a%20-%2041&query_place_id=ChIJWy7PWB-DRo4RatmsIAbFvBU';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  type Field = { key: string; label?: string; value?: string; changeMessage?: string; attributedValue?: string };
+  const fields = (pass: { storeCard: Record<string, Field[]> }, group: string): Record<string, Field> =>
+    Object.fromEntries((pass.storeCard[group] ?? []).map((f) => [f.key, f]));
+
+  it('strip image from the background, level, progress, lucky stamps and contact back fields', async () => {
+    apple.setAppleWalletOverrides({ config });
+    const campaignId = await styledCampaign();
+    await db.pool.query(`update loyalty.campaigns set background_image = $2, social = $3::jsonb where id = $1`, [
+      campaignId,
+      BG_PATH,
+      JSON.stringify({
+        whatsapp: '+57 301 464 8943',
+        phone: '+57 301 464 8943',
+        mapsUrl: MAPS,
+        hours: 'Lun–Sáb 13:00–19:00 · Domingos y festivos cerrado',
+      }),
+    ]);
+    const bg = await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#d4a373' } }).jpeg().toBuffer();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(bg), { status: 200 })));
+    const card = await insertCard({ campaignId, stamps: 9 });
+    for (let i = 0; i < 5; i++) {
+      await db.pool.query(
+        `insert into loyalty.transactions (card_id, type, amount, date, "timestamp", title) values ($1, $2, 1, 'x', $3, 'x')`,
+        [card.id, i < 4 ? 'stamp_add' : 'bonus', Date.now()],
+      );
+    }
+
+    const { pass, files } = await issue(card.uniqueId);
+    for (const [name, w, h] of [['strip.png', 375, 123], ['strip@2x.png', 750, 246], ['strip@3x.png', 1125, 369]] as const) {
+      const meta = await sharp(files[name]!).metadata();
+      expect([name, meta.width, meta.height]).toEqual([name, w, h]);
+    }
+    expect(fields(pass, 'secondaryFields')['level']).toMatchObject({ label: 'Nivel', value: 'Bronce' });
+    expect(fields(pass, 'secondaryFields')['lucky']).toMatchObject({ label: 'De la suerte', value: '1' });
+    expect(fields(pass, 'auxiliaryFields')).toEqual({
+      progress: { key: 'progress', label: 'Tu recompensa', value: 'Te falta 1 sello para tu Manicure gratis' },
+    });
+    const back = fields(pass, 'backFields');
+    const wa = 'https://api.whatsapp.com/send?phone=573014648943&text=Hola.%20Quiero%20agendar!';
+    expect(back['whatsapp']).toMatchObject({ value: wa, attributedValue: `<a href="${wa}">Agendar por WhatsApp</a>` });
+    expect(back['maps']).toMatchObject({ label: 'Cómo llegar', value: MAPS });
+    expect(back['call']).toMatchObject({ label: 'Teléfono', value: 'tel:+573014648943' });
+    expect(back['hours']).toMatchObject({ label: 'Horario', value: 'Lun–Sáb 13:00–19:00 · Domingos y festivos cerrado' });
+    expect(back['news']).toBeUndefined();
+  });
+
+  it('notifications: Novedades field for messages, silent stamps after a game win', async () => {
+    const apns = fakeApns();
+    apple.setAppleWalletOverrides({ config, push: apns.push });
+    const campaignId = await styledCampaign();
+    const card = await insertCard({ campaignId, stamps: 9 });
+    await issue(card.uniqueId);
+    const latest = async () => {
+      const stored = await apple.findApplePass(card.uniqueId);
+      return readPkpass((await apple.renderStoredPass(stored!))!).pass;
+    };
+    const change = (cause: 'stamp' | 'bonus' | 'other') => ({ causes: new Set([cause] as const), giftedStamps: 0 });
+
+    // Card completes: the news field carries the message with a changeMessage.
+    await db.pool.query(`update loyalty.issued_cards set stamps = 10 where id = $1`, [card.id]);
+    await apple.notifyApplePass(card.id, change('stamp'));
+    let pass = await latest();
+    expect(fields(pass, 'backFields')['news']).toEqual({
+      key: 'news',
+      label: 'Novedades',
+      value: '🎉 ¡Tu Manicure gratis está listo! Muéstralo en el salón para reclamarlo.',
+      changeMessage: '%@',
+    });
+    // The message rings; the stamps field doesn't ring on top of it.
+    expect(fields(pass, 'primaryFields')['stamps']).not.toHaveProperty('changeMessage');
+
+    // A plain stamp rings through the stamps field.
+    await db.pool.query(`update loyalty.issued_cards set stamps = 1 where id = $1`, [card.id]);
+    await apple.notifyApplePass(card.id, change('other'));
+    await db.pool.query(`update loyalty.issued_cards set stamps = 2 where id = $1`, [card.id]);
+    await apple.notifyApplePass(card.id, change('stamp'));
+    pass = await latest();
+    expect(fields(pass, 'primaryFields')['stamps']).toMatchObject({ changeMessage: 'Ahora tienes %@ sellos' });
+
+    // A game win: silent.
+    await db.pool.query(`update loyalty.issued_cards set stamps = 3 where id = $1`, [card.id]);
+    await apple.notifyApplePass(card.id, change('bonus'));
+    pass = await latest();
+    expect(fields(pass, 'primaryFields')['stamps']).not.toHaveProperty('changeMessage');
+    expect(apns.calls).toHaveLength(0); // no device registered: nothing to push, nothing failing
+
+    // Weekly game. 2 notifications spent today and it must leave one slot free.
+    expect(await apple.sendAppleWeeklyGame(card.id, 'weekly_game:2026-W45')).toBe('silent');
+    const first = fields(await latest(), 'backFields')['news']!;
+    expect(first.value!.startsWith('🎟️ Tu raspa y gana de la semana está listo')).toBe(true);
+    expect(first).not.toHaveProperty('changeMessage');
+    expect(await apple.sendAppleWeeklyGame(card.id, 'weekly_game:2026-W45')).toBe('duplicate');
+    // Next week, budget back: same text, still a change for Wallet, and it rings.
+    await db.pool.query(`update loyalty.wallet_notifications set created_at = created_at - interval '2 days'`);
+    expect(await apple.sendAppleWeeklyGame(card.id, 'weekly_game:2026-W46')).toBe('sent');
+    const second = fields(await latest(), 'backFields')['news']!;
+    expect(second.value).not.toBe(first.value);
+    expect(second.changeMessage).toBe('%@');
+  });
+
+  it('records register / unregister as save / delete events', async () => {
+    apple.setAppleWalletOverrides({ config });
+    const campaignId = await insertCampaign(db.pool, owner.userId, { name: 'Uñas' });
+    const card = await insertCard({ campaignId });
+    const { token } = await issue(card.uniqueId);
+
+    expect((await register(card.uniqueId, token)).statusCode).toBe(201);
+    expect((await register(card.uniqueId, token)).statusCode).toBe(200); // re-registration: not a new save
+    await rig.app.inject({ method: 'DELETE', url: regUrl(card.uniqueId), headers: auth(token) });
+    await rig.app.inject({ method: 'DELETE', url: regUrl(card.uniqueId), headers: auth(token) }); // already gone
+    const { rows } = await db.pool.query(`select card_id, provider, event from loyalty.wallet_pass_events order by id`);
+    expect(rows).toEqual([
+      { card_id: card.id, provider: 'apple', event: 'save' },
+      { card_id: card.id, provider: 'apple', event: 'delete' },
+    ]);
   });
 });

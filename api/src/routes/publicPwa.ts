@@ -1,6 +1,8 @@
 // "Install the card as an app" (docs/CARD_ENGAGEMENT_PLAN.md §7.2):
 //   GET /public/cards/:slug/:uniqueId/manifest.webmanifest — per-card manifest
 //   GET /public/brand/:slug/icon-{180|192|512}.png        — home-screen icons
+//   GET /public/brand/:slug/hero.jpg?c=<campaignId>        — Google Wallet hero
+//                                                            (campaign background)
 //
 // Cross-origin manifest: the SPA and the API live on different origins, and
 // the manifest is served from the API. Per the Web App Manifest spec, URL
@@ -11,7 +13,7 @@
 // at this API (API_PUBLIC_URL). The browser fetches a `<link rel="manifest">`
 // in CORS mode without credentials, which the global @fastify/cors plugin
 // already answers for SPA_ORIGIN.
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import sharp from 'sharp';
 import { env } from '../config.js';
 import { db } from '../db/kysely.js';
@@ -25,6 +27,9 @@ const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } 
 
 const ICON_SIZES = new Set([180, 192, 512]);
 const ICON_FILE_RE = /^icon-(\d+)\.png$/;
+/** Google Wallet's recommended hero image size. */
+export const HERO_WIDTH = 1032;
+export const HERO_HEIGHT = 336;
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 const LOGO_FETCH_TIMEOUT_MS = 4000;
 const DEFAULT_BG = '#ffffff';
@@ -249,6 +254,18 @@ export const cachedLogo = async (ownerId: string, ref: string) => {
   return buf;
 };
 
+/** Any owner image (logo, background) by reference, cached like logos. */
+export const cachedImage = cachedLogo;
+
+/** `image` scaled to cover w×h, centre-cropped. */
+export const renderCover = async (image: Buffer, width: number, height: number, format: 'jpeg' | 'png') => {
+  const pipeline = sharp(image, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize(width, height, { fit: 'cover', position: 'centre' })
+    .flatten({ background: '#ffffff' });
+  return format === 'jpeg' ? pipeline.jpeg({ quality: 82, mozjpeg: true }).toBuffer() : pipeline.png().toBuffer();
+};
+
 const cachedIcon = async (key: string, make: () => Promise<{ png: Buffer; cacheable: boolean }>) => {
   const hit = iconCache.get(key);
   if (hit && Date.now() - hit.at < ICON_CACHE_TTL_MS) return hit.png;
@@ -258,6 +275,56 @@ const cachedIcon = async (key: string, make: () => Promise<{ png: Buffer; cachea
   iconCache.set(key, { at: Date.now(), png });
   if (iconCache.size > ICON_CACHE_MAX) iconCache.delete(iconCache.keys().next().value!);
   return png;
+};
+
+// ---------------------------------------------------------------------------
+// Hero image
+// ---------------------------------------------------------------------------
+
+/**
+ * The campaign background as Google Wallet's hero image. Backgrounds live in
+ * a private bucket behind short-lived signed URLs, which Google can't keep
+ * using, so this streams a resized copy. `c` picks the campaign (else the
+ * owner's brand campaign); 404 when it has no background image.
+ */
+const sendHero = async (rawSlug: string, campaignId: string | undefined, reply: FastifyReply) => {
+  const owner = await findOwner(rawSlug);
+  if (!owner) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
+  const campaign = typeof campaignId === 'string' && campaignId
+    ? await db
+        .selectFrom('campaigns')
+        .select('background_image')
+        .where('id', '=', campaignId)
+        .where('owner_id', '=', owner.id)
+        .executeTakeFirst()
+    : await db
+        .selectFrom('campaigns')
+        .select('background_image')
+        .where('owner_id', '=', owner.id)
+        .orderBy((eb) => eb('background_image', 'is', null), 'asc')
+        .orderBy('created_at', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+  const ref = campaign?.background_image;
+  if (!ref) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
+
+  const key = ['hero', owner.id, ref].join('|');
+  const jpg = await cachedIcon(key, async () => {
+    const source = await cachedImage(owner.id, ref);
+    if (!source) return { png: Buffer.alloc(0), cacheable: false };
+    try {
+      return { png: await renderCover(source, HERO_WIDTH, HERO_HEIGHT, 'jpeg'), cacheable: true };
+    } catch {
+      return { png: Buffer.alloc(0), cacheable: false };
+    }
+  });
+  if (!jpg.length) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
+  return reply
+    .header('Content-Type', 'image/jpeg')
+    .header('Cache-Control', 'public, max-age=86400')
+    // Fetched by Google's image proxy, and helmet defaults CORP to same-origin.
+    .header('Cross-Origin-Resource-Policy', 'cross-origin')
+    .send(jpg);
 };
 
 // ---------------------------------------------------------------------------
@@ -308,10 +375,11 @@ export const publicPwaRoutes: FastifyPluginAsync = async (app) => {
 
   // `icon-:size.png` as one param: find-my-way's mid-segment params are
   // fiddly, so match the file name here instead.
-  app.get<{ Params: { slug: string; file: string }; Querystring: { maskable?: string; bg?: string } }>(
+  app.get<{ Params: { slug: string; file: string }; Querystring: { maskable?: string; bg?: string; c?: string } }>(
     '/public/brand/:slug/:file',
     PUBLIC_GET,
     async (req, reply) => {
+      if (req.params.file === 'hero.jpg') return sendHero(req.params.slug, req.query.c, reply);
       const size = Number(ICON_FILE_RE.exec(req.params.file)?.[1]);
       if (!ICON_SIZES.has(size)) throw new AppError(404, 'NOT_FOUND', 'Icon not found.');
       const maskable = req.query.maskable === '1';

@@ -32,6 +32,17 @@ export interface EngagementReport {
   previous: EngagementKpis;
   experiment: { fx: EngagementArm; holdout: EngagementArm; enoughData: boolean };
   sources: Record<CardViewSource, number>;
+  /** Passes in Wallet. Optional: absent from APIs older than migration 0017. */
+  walletPasses?: Record<'google' | 'apple', WalletPassStats>;
+}
+
+export interface WalletPassStats {
+  /** Passes in clients' wallets now (Google: since save callbacks went live). */
+  current: number;
+  /** Saved in range (Apple: per device). */
+  added: number;
+  /** Removed in range. */
+  removed: number;
 }
 
 /** `from`/`to` are inclusive YYYY-MM-DD dates (America/Bogota on the server). */

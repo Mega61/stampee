@@ -24,15 +24,18 @@ let logged: unknown[];
 
 const ISSUER = '3388000000012345678';
 
+// `calls` = object calls; syncs also upsert the campaign class (once per
+// client, cached), recorded apart in `classCalls`.
 const fakeGoogle = (respond: (req: WalletRequest) => number | Error = () => 200) => {
   const calls: WalletRequest[] = [];
+  const classCalls: WalletRequest[] = [];
   const http = async (req: WalletRequest): Promise<WalletResponse> => {
-    calls.push(req);
+    (req.path.startsWith('/loyaltyClass') ? classCalls : calls).push(req);
     const out = respond(req);
     if (out instanceof Error) throw out;
     return { status: out, body: {} };
   };
-  return { calls, http };
+  return { calls, classCalls, http };
 };
 
 beforeAll(async () => {
@@ -144,9 +147,12 @@ describe('onCardChanged', () => {
       {
         method: 'PATCH',
         path: `/loyaltyObject/${encodeURIComponent(withPass.objectId)}`,
-        body: { state: 'ACTIVE', loyaltyPoints: { label: 'Sellos', balance: { string: '3/10' } } },
+        body: expect.objectContaining({ state: 'ACTIVE', loyaltyPoints: { label: 'Sellos', balance: { string: '3/10' } } }),
       },
     ]);
+    // No cause, no earlier sync state: nothing to ring about.
+    expect(google.calls[0]!.body).not.toHaveProperty('notifyPreference');
+    expect(google.classCalls.map((c) => c.method)).toEqual(['POST']);
     expect(await lastSynced(withPass.id)).toBeInstanceOf(Date);
     expect(logged).toEqual([]);
   });
@@ -218,7 +224,11 @@ describe('cards routes call onCardChanged', () => {
 
     await events.flushCardEvents();
     expect(google.calls).toHaveLength(1);
-    expect(google.calls[0]!.body).toMatchObject({ loyaltyPoints: { balance: { string: '4/10' } } });
+    // A stamp: the balance update itself notifies.
+    expect(google.calls[0]!.body).toMatchObject({
+      loyaltyPoints: { balance: { string: '4/10' } },
+      notifyPreference: 'NOTIFY_ON_UPDATE',
+    });
   });
 
   it('POST /cards/gift-stamps syncs each gifted card', async () => {
@@ -242,11 +252,20 @@ describe('cards routes call onCardChanged', () => {
 
     await events.flushCardEvents();
     const balances = Object.fromEntries(
-      google.calls.map((c) => [c.path, (c.body as { loyaltyPoints: { balance: { string: string } } }).loyaltyPoints.balance.string]),
+      google.calls.filter((c) => c.method === 'PATCH').map((c) => [c.path, (c.body as { loyaltyPoints: { balance: { string: string } } }).loyaltyPoints.balance.string]),
     );
     expect(balances).toEqual({
       [`/loyaltyObject/${encodeURIComponent(a.objectId)}`]: '3/10',
       [`/loyaltyObject/${encodeURIComponent(b.objectId)}`]: '4/10',
+    });
+    // A gift rings once, through its message (the balance PATCH stays silent).
+    for (const c of google.calls.filter((c) => c.method === 'PATCH')) expect(c.body).not.toHaveProperty('notifyPreference');
+    const messages = google.calls.filter((c) => c.path.endsWith('/addMessage'));
+    expect(messages.map((c) => c.path).sort()).toEqual(
+      [a, b].map((card) => `/loyaltyObject/${encodeURIComponent(card.objectId)}/addMessage`).sort(),
+    );
+    expect(messages[0]!.body).toMatchObject({
+      message: { header: '🎁 Golden Beauty te regaló 2 sellos', body: 'Te esperamos pronto 💛', messageType: 'TEXT_AND_NOTIFY' },
     });
   });
 

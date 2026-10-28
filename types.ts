@@ -61,6 +61,16 @@ export interface SocialLinks {
   x?: string;
   youtube?: string;
   website?: string;
+  // Business contact. WhatsApp shows as a social icon on the card ("book by
+  // WhatsApp"); all four also go to the wallet passes (links + hours).
+  /** WhatsApp number, e.g. "+57 301 464 8943" (10-digit Colombian numbers get +57). */
+  whatsapp?: string;
+  /** Phone for "Llamar" on the wallet passes (falls back to the WhatsApp number). */
+  phone?: string;
+  /** Google Maps link for "Cómo llegar". */
+  mapsUrl?: string;
+  /** Opening hours, free text. */
+  hours?: string;
 }
 
 export type StoredTemplate = Omit<Template, 'icon'> & {

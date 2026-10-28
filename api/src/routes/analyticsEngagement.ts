@@ -164,6 +164,54 @@ const fetchSessionAgg = async (ownerId: string, from: string, to: string): Promi
   return rows[0]!;
 };
 
+type WalletProviderStats = { current: number; added: number; removed: number };
+
+// Passes in Wallet (wallet_pass_events, 0017). "current" for Google = cards
+// whose latest Google event is a save (events start when the save/delete
+// callback went live); for Apple = passes with a registered device right now.
+// added/removed = save/delete events in range (Apple: per device).
+const fetchWalletStats = async (
+  ownerId: string,
+  from: string,
+  to: string,
+): Promise<Record<'google' | 'apple', WalletProviderStats>> => {
+  const { rows } = await sql<{ provider: 'google' | 'apple'; current: number; added: number; removed: number }>`
+    with b as (
+      select (${from}::date)::timestamp at time zone ${TZ} as start_at,
+             (${to}::date + 1)::timestamp at time zone ${TZ} as end_at
+    ),
+    owner_events as (
+      select e.* from loyalty.wallet_pass_events e
+      join loyalty.issued_cards c on c.id = e.card_id
+      where c.owner_id = ${ownerId}
+    ),
+    latest as (
+      select distinct on (card_id, provider) card_id, provider, event
+      from owner_events
+      order by card_id, provider, at desc, id desc
+    ),
+    providers(provider) as (values ('google'), ('apple'))
+    select p.provider,
+      case when p.provider = 'apple' then (
+        select count(distinct d.serial)::int from loyalty.wallet_devices d
+        join loyalty.issued_cards c on c.unique_id = d.serial
+        where c.owner_id = ${ownerId}
+      ) else (
+        select count(*)::int from latest l where l.provider = p.provider and l.event = 'save'
+      ) end as current,
+      (select count(*)::int from owner_events e, b
+        where e.provider = p.provider and e.event = 'save' and e.at >= b.start_at and e.at < b.end_at) as added,
+      (select count(*)::int from owner_events e, b
+        where e.provider = p.provider and e.event = 'delete' and e.at >= b.start_at and e.at < b.end_at) as removed
+    from providers p
+  `.execute(db);
+  const pick = (provider: 'google' | 'apple'): WalletProviderStats => {
+    const r = rows.find((row) => row.provider === provider);
+    return { current: Number(r?.current ?? 0), added: Number(r?.added ?? 0), removed: Number(r?.removed ?? 0) };
+  };
+  return { google: pick('google'), apple: pick('apple') };
+};
+
 const visitKpis = (rows: CardRow[]) => {
   const visited = rows.filter((r) => r.visited);
   return {
@@ -195,11 +243,12 @@ export const analyticsEngagementRoutes: FastifyPluginAsync = async (app) => {
     const prevFrom = shiftDate(from, -days);
     const prevTo = shiftDate(from, -1);
 
-    const [rows, agg, prevRows, prevAgg] = await Promise.all([
+    const [rows, agg, prevRows, prevAgg, walletPasses] = await Promise.all([
       fetchCardRows(ownerId, from, to),
       fetchSessionAgg(ownerId, from, to),
       fetchCardRows(ownerId, prevFrom, prevTo),
       fetchSessionAgg(ownerId, prevFrom, prevTo),
+      fetchWalletStats(ownerId, from, to),
     ]);
 
     // Experiment arms. `cards` = every card issued by the owner in that arm
@@ -231,6 +280,7 @@ export const analyticsEngagementRoutes: FastifyPluginAsync = async (app) => {
           enoughData: fx.cardsWithVisit >= MIN_CARDS_PER_ARM && holdout.cardsWithVisit >= MIN_CARDS_PER_ARM,
         },
         sources: { link: agg.link, pwa: agg.pwa, wallet: agg.wallet, whatsapp: agg.whatsapp },
+        walletPasses,
       },
     };
   });
