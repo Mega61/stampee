@@ -18,6 +18,7 @@ import { db } from '../db/kysely.js';
 import { AppError } from '../lib/errors.js';
 import { normalizeSlug } from '../lib/slug.js';
 import { signedReadUrl } from '../storage/gcs.js';
+import { fetchPublicHttps } from '../lib/safeFetch.js';
 
 const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
 
@@ -70,6 +71,12 @@ const findBrandCampaign = async (ownerId: string) =>
     .orderBy('created_at', 'desc')
     .limit(1)
     .executeTakeFirst();
+
+/** Background colors the owner actually uses — the only accepted `?bg=` values. */
+const ownerBackgrounds = async (ownerId: string) => {
+  const rows = await db.selectFrom('campaigns').select('colors').where('owner_id', '=', ownerId).execute();
+  return new Set(rows.map((r) => colorsBackground(r.colors)?.toLowerCase()).filter((v): v is string => !!v));
+};
 
 // ---------------------------------------------------------------------------
 // Manifest
@@ -168,13 +175,6 @@ const fallbackIconSvg = (name: string, size: number, bg: string, maskable: boole
   );
 };
 
-const isPrivateHost = (hostname: string) =>
-  hostname === 'localhost' ||
-  hostname.endsWith('.internal') ||
-  hostname.endsWith('.local') ||
-  /^[\d.]+$/.test(hostname) ||
-  hostname.includes(':');
-
 /** Logo bytes, or null on any problem (caller falls back to the initial). */
 const loadLogo = async (ref: string): Promise<Buffer | null> => {
   try {
@@ -182,15 +182,11 @@ const loadLogo = async (ref: string): Promise<Buffer | null> => {
     // owner-pasted external URL, only fetched over https from a public host.
     const url = await signedReadUrl(ref);
     if (!url) return null;
-    const external = url === ref;
-    if (external) {
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'https:' || isPrivateHost(parsed.hostname)) return null;
+    if (url === ref) {
+      // Owner-pasted URL: DNS-checked, https only, no redirects (SSRF guard).
+      return await fetchPublicHttps(url, { timeoutMs: LOGO_FETCH_TIMEOUT_MS, maxBytes: MAX_LOGO_BYTES });
     }
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(LOGO_FETCH_TIMEOUT_MS),
-      redirect: external ? 'error' : 'follow',
-    });
+    const res = await fetch(url, { signal: AbortSignal.timeout(LOGO_FETCH_TIMEOUT_MS) });
     if (!res.ok) return null;
     const declared = Number(res.headers.get('content-length') ?? 0);
     if (declared > MAX_LOGO_BYTES) return null;
@@ -235,6 +231,22 @@ export const renderIcon = async (params: {
 const ICON_CACHE_MAX = 64;
 const ICON_CACHE_TTL_MS = 10 * 60 * 1000;
 const iconCache = new Map<string, { at: number; png: Buffer }>();
+
+// Decoded logos, cached apart from rendered icons so varying sizes/colors
+// never re-fetch the logo.
+const LOGO_CACHE_MAX = 32;
+const logoCache = new Map<string, { at: number; buf: Buffer }>();
+const cachedLogo = async (ownerId: string, ref: string) => {
+  const key = `${ownerId}|${ref}`;
+  const hit = logoCache.get(key);
+  if (hit && Date.now() - hit.at < ICON_CACHE_TTL_MS) return hit.buf;
+  const buf = await loadLogo(ref);
+  if (!buf) return null;
+  logoCache.delete(key);
+  logoCache.set(key, { at: Date.now(), buf });
+  if (logoCache.size > LOGO_CACHE_MAX) logoCache.delete(logoCache.keys().next().value!);
+  return buf;
+};
 
 const cachedIcon = async (key: string, make: () => Promise<{ png: Buffer; cacheable: boolean }>) => {
   const hit = iconCache.get(key);
@@ -307,13 +319,16 @@ export const publicPwaRoutes: FastifyPluginAsync = async (app) => {
       const owner = await findOwner(req.params.slug);
       if (!owner) throw new AppError(404, 'NOT_FOUND', 'Icon not found.');
       const campaign = await findBrandCampaign(owner.id);
-      const background = bgParam ?? colorsBackground(campaign?.colors) ?? DEFAULT_BG;
+      // Only the owner's own colors: arbitrary values would let anyone force
+      // a fresh render per request.
+      const allowedBg = bgParam && (await ownerBackgrounds(owner.id)).has(bgParam) ? bgParam : null;
+      const background = allowedBg ?? colorsBackground(campaign?.colors) ?? DEFAULT_BG;
       const logoRef = campaign?.logo_image ?? null;
       const businessName = owner.business_name ?? '';
 
       const key = [owner.id, size, maskable ? 1 : 0, background, logoRef ?? '', businessName].join('|');
       const png = await cachedIcon(key, async () => {
-        const logo = logoRef ? await loadLogo(logoRef) : null;
+        const logo = logoRef ? await cachedLogo(owner.id, logoRef) : null;
         const rendered = await renderIcon({ size, maskable, background, businessName, logo });
         // Don't pin a transient logo-fetch failure in the cache.
         return { png: rendered, cacheable: !logoRef || logo !== null };

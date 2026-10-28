@@ -172,10 +172,17 @@ describe('GET /public/brand/:slug/icon-:size.png', () => {
     // Outside the 56% safe box it's the background.
     expect(await pixel(res.rawPayload, 100, 256)).toEqual([255, 255, 255]);
 
-    // `bg` overrides the brand color (the manifest passes the card's).
+    // `bg` overrides the brand color (the manifest passes the card's) — but
+    // only with one of the owner's own campaign colors.
+    const other = await insertCampaign(db.pool, owner.userId, { name: 'Pestañas' });
+    await setCampaignBrand(other, { background: '#000000' }, null);
     const tinted = await rig.app.inject({ method: 'GET', url: `/public/brand/${owner.slug}/icon-192.png?bg=000000` });
     expect(await pixel(tinted.rawPayload, 1, 1)).toEqual([0, 0, 0]);
     expect(await pixel(tinted.rawPayload, 96, 96)).toEqual([255, 0, 0]);
+    const foreign = await rig.app.inject({ method: 'GET', url: `/public/brand/${owner.slug}/icon-192.png?bg=00ff00` });
+    expect(await pixel(foreign.rawPayload, 1, 1)).not.toEqual([0, 255, 0]);
+    // The logo was fetched once and reused for every size/color.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to the initial when the logo cannot be fetched', async () => {
