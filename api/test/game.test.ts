@@ -88,6 +88,7 @@ const makeCard = async (opts: {
   holdout?: boolean;
   campaign?: string | null;
   snapshotTotal?: number;
+  customer?: string;
 } = {}) => {
   const uniqueId = uniqueIdFor(opts.holdout ?? false);
   const snapshot = opts.snapshotTotal ? JSON.stringify({ totalStamps: opts.snapshotTotal }) : null;
@@ -98,7 +99,7 @@ const makeCard = async (opts: {
      returning id`,
     [
       uniqueId,
-      customerId,
+      opts.customer ?? customerId,
       opts.campaign === undefined ? campaignId : opts.campaign,
       owner.userId,
       opts.stamps ?? 3,
@@ -161,6 +162,12 @@ describe('game: state', () => {
     }
     const { rows } = await db.pool.query('select * from loyalty.card_plays');
     expect(rows).toHaveLength(0);
+  });
+
+  it("a new card is eligible through the client's recent visit on another card", async () => {
+    await makeCard({ status: 'Redeemed' }); // visited 5 days ago, then redeemed
+    const fresh = await makeCard({ stamps: 0, visitAt: null });
+    expect((await getGame(fresh.uniqueId)).json().data.state).toBe('available');
   });
 
   it('a redeemed card is locked (NOT_ACTIVE)', async () => {
@@ -448,8 +455,9 @@ describe('game: visit analytics', () => {
     const summary = JSON.stringify(lookup.json().data);
     expect(summary).toContain(`"lastVisitAt":"${new Date(visitAt).toISOString()}"`);
 
-    // A card whose only recent activity is a bonus is not eligible.
-    const stale = await makeCard({ visitAt: Date.now() - 90 * DAY });
+    // A client whose only recent activity is a bonus is not eligible.
+    const staleClient = await insertCustomer(db.pool, owner.userId, { name: 'Ana', email: 'ana@x.com' });
+    const stale = await makeCard({ visitAt: Date.now() - 90 * DAY, customer: staleClient });
     await addTx(stale.id, 'bonus', Date.now() - DAY);
     expect((await getGame(stale.uniqueId)).json().data).toMatchObject({ state: 'locked', reason: 'NO_RECENT_VISIT' });
   });

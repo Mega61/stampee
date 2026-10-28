@@ -339,7 +339,9 @@ export const toCardPassData = (row: CardPassRow): CardPassData => {
     stamps: row.stamps,
     totalStamps,
     status: row.status === 'Redeemed' ? 'Redeemed' : 'Active',
-    background: colorOf(snapshot['colors']) ?? colorOf(row.campaignColors) ?? DEFAULT_BG,
+    // The class is shared by every card of the campaign, so its color must come
+    // from the live campaign; per-card snapshots would make passes flip colors.
+    background: colorOf(row.campaignColors) ?? colorOf(snapshot['colors']) ?? DEFAULT_BG,
   };
 };
 

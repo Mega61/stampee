@@ -12,6 +12,7 @@ import { CardViewBody } from '../schemas/engagement.js';
 // The client pings at mount and again on pagehide, so 30/min/IP is plenty.
 const PUBLIC_BEACON = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
 
+const MAX_SESSIONS_PER_CARD_PER_DAY = 30;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Registered without fastify-plugin, so this parser override is encapsulated
@@ -45,6 +46,25 @@ export const publicViewsRoutes: FastifyPluginAsync = async (app) => {
         .where('issued_cards.unique_id', '=', req.params.uniqueId)
         .executeTakeFirst();
       if (!card) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
+
+      // Anyone holding the link can mint session ids. Real clients open a card
+      // a few times a day at most, so beyond the cap new sessions are dropped
+      // (updates to existing sessions still apply) to keep analytics honest.
+      const existing = await db
+        .selectFrom('card_views')
+        .select('id')
+        .where('card_id', '=', card.id)
+        .where('session_id', '=', body.sessionId)
+        .executeTakeFirst();
+      if (!existing) {
+        const recent = await db
+          .selectFrom('card_views')
+          .select((eb) => eb.fn.countAll<string>().as('n'))
+          .where('card_id', '=', card.id)
+          .where('started_at', '>=', sql<Date>`now() - interval '1 day'`)
+          .executeTakeFirstOrThrow();
+        if (Number(recent.n) >= MAX_SESSIONS_PER_CARD_PER_DAY) return reply.code(204).send();
+      }
 
       // Start ping + final ping share a session id: keep the first source and
       // variant, and the max of the counters (pings can arrive out of order).

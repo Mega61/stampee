@@ -15,6 +15,7 @@ import {
 import { normalizeSlug } from '../lib/slug.js';
 import { computeGameState, type GameCampaign } from '../lib/game.js';
 import { signedReadUrl } from '../storage/gcs.js';
+import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 
 const PublicSignupBody = z.object({
   name: z.string().trim().min(1, 'Name is required.').max(120),
@@ -34,6 +35,8 @@ const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } 
 const PUBLIC_POST_SIGNUP = { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } };
 
 export const publicRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('preHandler', rejectMalformedUniqueId);
+
   // GET /public/cards/:slug/:uniqueId — anonymous loyalty-card view.
   app.get<{ Params: { slug: string; uniqueId: string } }>(
     '/public/cards/:slug/:uniqueId',

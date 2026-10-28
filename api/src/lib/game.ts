@@ -114,13 +114,22 @@ const findBonusTx = async (db: Db, cardId: string, playedAt: Date) => {
   return row ? toTransactionDto({ ...(row as unknown as TransactionRow), timestamp: Number(row.timestamp) }) : undefined;
 };
 
+// A real visit by the same client on ANY of their cards with this business —
+// so a fresh card issued right after redeeming can play without waiting for
+// its first stamp. Gifts/bonus never count.
 const hasRecentVisit = async (db: Db, cardId: string, now: Date) => {
   const row = await db
     .selectFrom('transactions')
-    .select('id')
-    .where('card_id', '=', cardId)
-    .where('type', '=', 'stamp_add')
-    .where('timestamp', '>=', now.getTime() - GAME_ELIGIBILITY_MS)
+    .innerJoin('issued_cards as visited', 'visited.id', 'transactions.card_id')
+    .innerJoin('issued_cards as this_card', (join) =>
+      join
+        .onRef('this_card.customer_id', '=', 'visited.customer_id')
+        .onRef('this_card.owner_id', '=', 'visited.owner_id'),
+    )
+    .select('transactions.id')
+    .where('this_card.id', '=', cardId)
+    .where('transactions.type', '=', 'stamp_add')
+    .where('transactions.timestamp', '>=', now.getTime() - GAME_ELIGIBILITY_MS)
     .limit(1)
     .executeTakeFirst();
   return Boolean(row);

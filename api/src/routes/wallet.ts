@@ -6,12 +6,15 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AppError } from '../lib/errors.js';
 import { createGoogleSaveUrl, isGoogleWalletEnabled } from '../lib/wallet/google.js';
+import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 
 const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
 // Each save call upserts class + object at Google: keep it tighter.
 const PUBLIC_SAVE = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
 export const walletRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('preHandler', rejectMalformedUniqueId);
+
   app.get('/public/wallet/config', PUBLIC_GET, async (_req, reply) => {
     reply.header('Cache-Control', 'public, max-age=300');
     return { ok: true, data: { google: isGoogleWalletEnabled() } };

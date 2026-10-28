@@ -19,6 +19,7 @@ import { AppError } from '../lib/errors.js';
 import { normalizeSlug } from '../lib/slug.js';
 import { signedReadUrl } from '../storage/gcs.js';
 import { fetchPublicHttps } from '../lib/safeFetch.js';
+import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 
 const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
 
@@ -264,6 +265,8 @@ const cachedIcon = async (key: string, make: () => Promise<{ png: Buffer; cachea
 // ---------------------------------------------------------------------------
 
 export const publicPwaRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('preHandler', rejectMalformedUniqueId);
+
   app.get<{ Params: { slug: string; uniqueId: string } }>(
     '/public/cards/:slug/:uniqueId/manifest.webmanifest',
     PUBLIC_GET,

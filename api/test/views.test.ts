@@ -101,6 +101,16 @@ describe('views: POST /public/cards/:slug/:uniqueId/views', () => {
     expect(rows[1]).toMatchObject({ session_id: 'session-other-1', duration_ms: 0 });
   });
 
+  it('caps new sessions per card per day but still updates existing ones', async () => {
+    for (let i = 0; i < 31; i++) {
+      expect((await post(event({ sessionId: `flood-session-${i}` }), { ip: `10.7.${i}.1` })).statusCode).toBe(204);
+    }
+    expect(await viewRows()).toHaveLength(30);
+    await post(event({ sessionId: 'flood-session-0', durationMs: 5000 }), { ip: '10.7.99.1' });
+    const { rows } = await db.pool.query(`select duration_ms from loyalty.card_views where session_id = 'flood-session-0'`);
+    expect(rows[0]?.duration_ms).toBe(5000);
+  });
+
   it('accepts sendBeacon-style text/plain JSON bodies', async () => {
     const res = await post(JSON.stringify(event({ source: 'whatsapp', variant: 'holdout', durationMs: 42 })), {
       contentType: 'text/plain;charset=UTF-8',

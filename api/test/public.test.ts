@@ -195,3 +195,19 @@ describe('public: POST /public/signup outcome matrix', () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe('public card routes: malformed uniqueId', () => {
+  it('returns 404 (not a 500 from the uuid cast) on every public card route', async () => {
+    const bad = 'not-a-uuid';
+    for (const [method, url] of [
+      ['GET', `/public/cards/${owner.slug}/${bad}`],
+      ['GET', `/public/cards/${owner.slug}/${bad}/game`],
+      ['POST', `/public/cards/${owner.slug}/${bad}/game/play`],
+      ['GET', `/public/cards/${owner.slug}/${bad}/manifest.webmanifest`],
+      ['GET', `/public/cards/${owner.slug}/${bad}/wallet/google`],
+    ] as const) {
+      const res = await rig.app.inject({ method, url, remoteAddress: `10.9.0.${Math.floor(Math.random() * 250)}` });
+      expect(res.statusCode, `${method} ${url}`).toBe(404);
+    }
+  });
+});

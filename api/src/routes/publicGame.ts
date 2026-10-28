@@ -19,6 +19,7 @@ import {
   type GameCard,
   type GameUnavailableReason,
 } from '../lib/game.js';
+import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 
 const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
 const PUBLIC_PLAY = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
@@ -206,6 +207,8 @@ const gameReport = async (ownerId: string, from: string, to: string) => {
 };
 
 export const publicGameRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('preHandler', rejectMalformedUniqueId);
+
   // GET /public/cards/:slug/:uniqueId/game — this week's game state.
   app.get<{ Params: { slug: string; uniqueId: string } }>(
     '/public/cards/:slug/:uniqueId/game',
