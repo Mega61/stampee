@@ -10,8 +10,8 @@ final.
 
 ## Status (2026-10-28)
 
-**Implemented** on branch `feat/card-engagement`: Phases 0–4 except Apple Wallet
-(Wave 4, data-gated). Waves 0–3 merged; API 201 tests, SPA 118 unit tests.
+**Implemented** on branch `feat/card-engagement`: Phases 0–4, including both
+Google Wallet and Apple Wallet (each env-gated until credentials are set). Waves 0–3 merged; API 201 tests, SPA 118 unit tests.
 Verified end to end against a real API + Postgres: live stamp moment, beacon
 rows, weekly game win → bonus transaction → stamp lands.
 
@@ -28,7 +28,10 @@ rows, weekly game win → bonus transaction → stamp lands.
 - Run migrations 0012–0015 on deploy.
 - GCS bucket CORS (`infra/README.md`) so uploaded backgrounds can be sampled.
 - Google Wallet: issuer account + service account + env vars
-  (`infra/README.md`). The feature is hidden until configured.
+  (`infra/README.md`). Hidden until configured.
+- Apple Wallet: Apple Developer Program, Pass Type ID + certificate, WWDR G4,
+  env vars (`infra/README.md` → "Apple Wallet setup"). Hidden until configured;
+  migration 0016. Both wallets need the API on public HTTPS.
 - The game is **off** per campaign until enabled in the editor ("Weekly scratch
   game").
 - Holdout: 10 % of cards see the classic card. After ~6 weeks, read the

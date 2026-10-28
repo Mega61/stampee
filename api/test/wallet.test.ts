@@ -104,7 +104,7 @@ describe('Google Wallet: not configured', () => {
 
     const cfg = await getConfig();
     expect(cfg.statusCode).toBe(200);
-    expect(cfg.json()).toEqual({ ok: true, data: { google: false } });
+    expect(cfg.json()).toEqual({ ok: true, data: { google: false, apple: false } });
 
     const save = await getSave(owner.slug, card.uniqueId);
     expect(save.statusCode).toBe(404);
@@ -117,7 +117,7 @@ describe('Google Wallet: not configured', () => {
 describe('Google Wallet: configured', () => {
   it('reports google=true', async () => {
     wallet.setGoogleWalletOverrides({ config, http: fakeGoogle().http });
-    expect((await getConfig()).json()).toEqual({ ok: true, data: { google: true } });
+    expect((await getConfig()).json()).toEqual({ ok: true, data: { google: true, apple: false } });
   });
 
   it('upserts class + object, records the pass and returns a signed save link', async () => {
