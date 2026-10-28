@@ -26,6 +26,7 @@ import { analyticsEngagementRoutes } from './routes/analyticsEngagement.js';
 import { publicPwaRoutes } from './routes/publicPwa.js';
 import { publicGameRoutes } from './routes/publicGame.js';
 import { walletRoutes } from './routes/wallet.js';
+import { appleWalletRoutes } from './routes/appleWallet.js';
 
 export const buildApp = async () => {
   const app = Fastify({
@@ -114,6 +115,7 @@ export const buildApp = async () => {
   await app.register(publicPwaRoutes);
   await app.register(publicGameRoutes);
   await app.register(walletRoutes);
+  await app.register(appleWalletRoutes);
 
   return app;
 };

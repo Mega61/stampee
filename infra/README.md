@@ -193,6 +193,67 @@ Stamp changes (`PATCH /cards/:id`, transactions, gift stamps, game wins) patch
 the object about a second later; failures are logged, never shown to staff.
 Google must be able to fetch the logo, so `API_PUBLIC_URL` must be public.
 
+## Apple Wallet setup
+
+iPhone clients get an "Agregar a Apple Wallet" button instead of the Google
+one; the pass updates itself (stamp count, redeemed) whenever the card
+changes, with a lock-screen notice ("Ahora tienes 5/10 sellos"). It is off
+until the `APPLE_*` variables below are set: `GET /public/wallet/config` says
+`{ apple: false }`, the button is hidden and every Apple route 404s.
+
+1. **Apple Developer Program.** Enroll the business at
+   [developer.apple.com/programs](https://developer.apple.com/programs/)
+   (USD 99/year; an organization needs a D-U-N-S number). Note the
+   **Team ID** (Membership details, 10 characters) → `APPLE_TEAM_ID`.
+2. **Pass Type ID.** *Certificates, Identifiers & Profiles → Identifiers → +
+   → Pass Type IDs*, e.g. `pass.com.goldenbeauty.loyalty` →
+   `APPLE_PASS_TYPE_ID`. It is permanent and appears inside every pass.
+3. **Certificate.** On any machine, create a key + signing request:
+
+   ```bash
+   openssl req -new -newkey rsa:2048 -nodes \
+     -keyout pass.key -out pass.csr -subj "/CN=Stampee Pass/O=Golden Beauty"
+   ```
+
+   In the portal open the Pass Type ID → *Create Certificate*, upload
+   `pass.csr`, download `pass.cer` and convert it to PEM:
+
+   ```bash
+   openssl x509 -inform DER -in pass.cer -out pass.pem
+   ```
+
+   (If you created the CSR with Keychain Access instead, export the
+   certificate + key as `pass.p12` and run
+   `openssl pkcs12 -in pass.p12 -clcerts -nokeys -out pass.pem` and
+   `openssl pkcs12 -in pass.p12 -nocerts -nodes -out pass.key`; add `-legacy`
+   with OpenSSL 3 if it complains about RC2.)
+   `pass.pem` → `APPLE_PASS_CERT`, `pass.key` → `APPLE_PASS_KEY`. If you keep
+   the key encrypted, put its password in `APPLE_PASS_KEY_PASSPHRASE`. The
+   certificate expires after a year: renew it before then (same Pass Type ID,
+   existing passes keep working).
+4. **WWDR G4.** Download *Worldwide Developer Relations - G4* from
+   [apple.com/certificateauthority](https://www.apple.com/certificateauthority/)
+   and convert it: `openssl x509 -inform DER -in AppleWWDRCAG4.cer -out wwdr.pem`
+   → `APPLE_WWDR_CERT`.
+5. **Env.** PEMs can be pasted as one line with `\n` escapes (quote them):
+   `awk 'NF {printf "%s\\n", $0}' pass.pem`. Leave `APPLE_APNS_HOST` at
+   `api.push.apple.com`.
+6. **Public HTTPS.** Wallet talks to the PassKit web service at
+   `${API_PUBLIC_URL}/wallet/apple` (registrations, updated passes, logs).
+   It must be reachable over HTTPS with a valid certificate (Caddy already
+   does this for `API_DOMAIN`), and outbound HTTP/2 to `api.push.apple.com:443`
+   must be allowed from the API container.
+7. Restart the API and add a card from Safari on an iPhone.
+
+How it works: the first tap downloads a signed `.pkpass` (serial number = the
+card's unique id) and records it in `wallet_passes` with a per-pass
+`auth_token`. Wallet registers the device (`wallet_devices`). After a stamp
+change, `onCardChanged` bumps the pass's `updated_at` and sends an empty APNs
+push (topic = the Pass Type ID, authenticated with the same certificate) to
+each registered device; Wallet then fetches the new pass. Devices APNs reports
+as gone (410) are dropped. Colors come from the live campaign; the icon and
+logo are the same brand mark as the home-screen icon.
+
 ## Adding Strapi later
 
 Strapi is intentionally not in `docker-compose.yml`. When you wire it in:

@@ -267,3 +267,146 @@ describe('cards routes call onCardChanged', () => {
     expect(logged).toHaveLength(1);
   });
 });
+
+describe('onCardChanged: Apple Wallet', () => {
+  const PASS_TYPE = 'pass.com.goldenbeauty.loyalty';
+  let apple: typeof import('../src/lib/wallet/apple.js');
+  // notifyApplePass never signs, so placeholder PEMs are enough here.
+  const appleConfig = {
+    passTypeId: PASS_TYPE,
+    teamId: 'ABCDE12345',
+    signerCert: 'cert',
+    signerKey: 'key',
+    wwdr: 'wwdr',
+    apnsHost: 'api.push.apple.invalid',
+    appPublicUrl: 'http://localhost:3000',
+    apiPublicUrl: 'http://localhost:3001',
+  };
+
+  const fakeApns = (respond: (token: string) => number | Error = () => 200) => {
+    const calls: string[][] = [];
+    const push = async (_cfg: unknown, tokens: string[]) => {
+      calls.push([...tokens].sort());
+      return tokens.map((pushToken) => {
+        const out = respond(pushToken);
+        if (out instanceof Error) throw out;
+        return { pushToken, status: out };
+      });
+    };
+    return { calls, push };
+  };
+
+  const insertApplePass = async (card: { id: string; uniqueId: string }, devices: Array<[string, string]>) => {
+    await db.pool.query(
+      `insert into loyalty.wallet_passes (card_id, provider, object_id, auth_token, updated_at)
+       values ($1, 'apple', $2, $3, now() - interval '1 hour')`,
+      [card.id, card.uniqueId, 'a'.repeat(64)],
+    );
+    for (const [device, token] of devices) {
+      await db.pool.query(
+        `insert into loyalty.wallet_devices (device_library_id, push_token, pass_type_id, serial) values ($1, $2, $3, $4)`,
+        [device, token, PASS_TYPE, card.uniqueId],
+      );
+    }
+  };
+
+  const appleUpdatedAt = async (cardId: string) => {
+    const { rows } = await db.pool.query(
+      `select updated_at from loyalty.wallet_passes where card_id = $1 and provider = 'apple'`,
+      [cardId],
+    );
+    return rows[0]?.updated_at as Date;
+  };
+
+  beforeAll(async () => {
+    apple = await import('../src/lib/wallet/apple.js');
+  });
+
+  afterEach(async () => {
+    await events.flushCardEvents();
+    apple.setAppleWalletOverrides(null);
+  });
+
+  it('bumps the pass and pushes every device of that pass only (Google off)', async () => {
+    const apns = fakeApns();
+    apple.setAppleWalletOverrides({ config: appleConfig, push: apns.push });
+    const card = await insertCard(3);
+    const other = await insertCard(1);
+    await insertApplePass(card, [['d1', '1'.repeat(64)], ['d2', '2'.repeat(64)]]);
+    await insertApplePass(other, [['d3', '3'.repeat(64)]]);
+    const before = await appleUpdatedAt(card.id);
+
+    events.onCardChanged(card.id);
+    expect(events.pendingCardEvents()).toEqual([card.id]);
+    expect(apns.calls).toHaveLength(0);
+    await events.flushCardEvents();
+
+    expect(apns.calls).toEqual([['1'.repeat(64), '2'.repeat(64)]]);
+    expect((await appleUpdatedAt(card.id)).getTime()).toBeGreaterThan(before.getTime());
+    expect((await appleUpdatedAt(other.id)).getTime()).toBeLessThan(Date.now() - 30 * 60_000);
+    expect(logged).toEqual([]);
+  });
+
+  it('drops devices APNs reports as gone (410) and logs other failures', async () => {
+    const apns = fakeApns((t) => (t.startsWith('1') ? 410 : t.startsWith('2') ? 500 : 200));
+    apple.setAppleWalletOverrides({ config: appleConfig, push: apns.push });
+    const card = await insertCard(3);
+    await insertApplePass(card, [['d1', '1'.repeat(64)], ['d2', '2'.repeat(64)], ['d3', '3'.repeat(64)]]);
+
+    events.onCardChanged(card.id);
+    await events.flushCardEvents();
+
+    const { rows } = await db.pool.query('select device_library_id from loyalty.wallet_devices order by 1');
+    expect(rows.map((r) => r.device_library_id)).toEqual(['d2', 'd3']);
+    expect(logged).toHaveLength(1);
+  });
+
+  it('never throws when APNs blows up, and Google still syncs', async () => {
+    const google = fakeGoogle();
+    wallet.setGoogleWalletOverrides({ config, http: google.http });
+    apple.setAppleWalletOverrides({ config: appleConfig, push: fakeApns(() => new Error('tls handshake')).push });
+    const card = await insertCard(4);
+    await insertPass(card);
+    await insertApplePass(card, [['d1', '1'.repeat(64)]]);
+
+    expect(() => events.onCardChanged(card.id)).not.toThrow();
+    await expect(events.flushCardEvents()).resolves.toBeUndefined();
+
+    expect(google.calls).toHaveLength(1);
+    expect(google.calls[0]!.body).toMatchObject({ loyaltyPoints: { balance: { string: '4/10' } } });
+    // Push failures are reported, never thrown; the device stays registered.
+    expect(logged).toHaveLength(1);
+    expect((await db.pool.query('select * from loyalty.wallet_devices')).rows).toHaveLength(1);
+  });
+
+  it('a Google failure does not stop the Apple push', async () => {
+    const apns = fakeApns();
+    wallet.setGoogleWalletOverrides({ config, http: fakeGoogle(() => 500).http });
+    apple.setAppleWalletOverrides({ config: appleConfig, push: apns.push });
+    const card = await insertCard(2);
+    await insertPass(card);
+    await insertApplePass(card, [['d1', '1'.repeat(64)]]);
+
+    events.onCardChanged(card.id);
+    await events.flushCardEvents();
+    expect(apns.calls).toHaveLength(1);
+    expect(logged).toHaveLength(1);
+  });
+
+  it('PATCH /cards/:id pushes the Apple pass', async () => {
+    const apns = fakeApns();
+    apple.setAppleWalletOverrides({ config: appleConfig, push: apns.push });
+    const card = await insertCard(3);
+    await insertApplePass(card, [['d1', '1'.repeat(64)]]);
+
+    const patch = await rig.app.inject({
+      method: 'PATCH',
+      url: `/cards/${card.id}`,
+      payload: { stamps: 4 },
+      headers: headers(),
+    });
+    expect(patch.statusCode).toBe(200);
+    await events.flushCardEvents();
+    expect(apns.calls).toEqual([['1'.repeat(64)]]);
+  });
+});

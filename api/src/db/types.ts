@@ -154,6 +154,20 @@ export interface WalletPassesTable {
   object_id: string;
   created_at: Generated<Date>;
   last_synced_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  // 0016_apple_wallet.sql — Apple only: PassKit web-service secret and the
+  // time the pass content last changed (passesUpdatedSince / Last-Modified).
+  auth_token: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: Generated<Date>;
+}
+
+// 0016_apple_wallet.sql — devices registered for Apple pass updates.
+export interface WalletDevicesTable {
+  device_library_id: string;
+  push_token: string;
+  pass_type_id: string;
+  /** The card's unique_id (= the pass serial number). */
+  serial: string;
+  registered_at: Generated<Date>;
 }
 
 // 0015_card_game.sql — one row per card per ISO week (America/Bogota).
@@ -180,5 +194,6 @@ export interface Database {
   api_keys: ApiKeysTable;
   card_views: CardViewsTable;
   wallet_passes: WalletPassesTable;
+  wallet_devices: WalletDevicesTable;
   card_plays: CardPlaysTable;
 }
