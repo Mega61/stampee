@@ -17,6 +17,7 @@ const readCached = (): WalletConfig | null => {
     const raw = sessionStorage.getItem(CONFIG_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<WalletConfig>;
+    if (parsed.google !== true && parsed.apple !== true) return null;
     return { google: parsed.google === true, apple: parsed.apple === true };
   } catch {
     return null;
@@ -32,7 +33,10 @@ export const fetchWalletConfig = (): Promise<WalletConfig> => {
     .then((data) => {
       const config = { google: data?.google === true, apple: data?.apple === true };
       try {
-        sessionStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+        // Only remember a positive answer: caching "off" would hide the buttons
+        // for the rest of the tab session after wallets get configured.
+        if (config.google || config.apple) sessionStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+        else sessionStorage.removeItem(CONFIG_KEY);
       } catch {
         // private mode / storage blocked: the in-memory promise still dedupes
       }
