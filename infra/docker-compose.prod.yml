@@ -55,6 +55,23 @@ x-stampee-api-env: &stampee-api-env
   GCS_PUBLIC_HOST: https://storage.googleapis.com
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_WORKSPACE_DOMAIN: ${GOOGLE_WORKSPACE_DOMAIN:-goldenbeautystudio.com.co}
+  # Behind the shared reverse proxy: trust one hop so per-IP rate limits see
+  # the real client.
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+  # Weekly scratch game holdout (10 % of cards). Set to "off" to end it.
+  GAME_HOLDOUT: ${GAME_HOLDOUT:-}
+  # Google Wallet (hidden until all three of ISSUER_ID / SA_EMAIL / SA_KEY are set).
+  GOOGLE_WALLET_ISSUER_ID: ${GOOGLE_WALLET_ISSUER_ID:-}
+  GOOGLE_WALLET_SA_EMAIL: ${GOOGLE_WALLET_SA_EMAIL:-}
+  GOOGLE_WALLET_SA_KEY: ${GOOGLE_WALLET_SA_KEY:-}
+  GOOGLE_WALLET_CLASS_PREFIX: ${GOOGLE_WALLET_CLASS_PREFIX:-stampee}
+  # Apple Wallet (hidden until configured; see infra/README.md).
+  APPLE_PASS_TYPE_ID: ${APPLE_PASS_TYPE_ID:-}
+  APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
+  APPLE_PASS_CERT: ${APPLE_PASS_CERT:-}
+  APPLE_PASS_KEY: ${APPLE_PASS_KEY:-}
+  APPLE_PASS_KEY_PASSPHRASE: ${APPLE_PASS_KEY_PASSPHRASE:-}
+  APPLE_WWDR_CERT: ${APPLE_WWDR_CERT:-}
   LOG_LEVEL: info
 
 services:
