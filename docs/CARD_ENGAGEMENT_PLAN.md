@@ -8,6 +8,34 @@ This document is the implementation plan. It is grounded in the current
 architecture and references concrete files. Code snippets are sketches, not
 final.
 
+## Status (2026-10-28)
+
+**Implemented** on branch `feat/card-engagement`: Phases 0–4 except Apple Wallet
+(Wave 4, data-gated). Waves 0–3 merged; API 201 tests, SPA 118 unit tests.
+Verified end to end against a real API + Postgres: live stamp moment, beacon
+rows, weekly game win → bonus transaction → stamp lands.
+
+**Try it locally**
+- `/dev/cards` — animated card with mock data (presets × fxStyle × photo,
+  +stamp / +gift / +bonus / complete). `/dev/ticket` — game ticket and reward
+  reveal with tuning sliders and forced win/lose. Both are dev-only. To open on a
+  phone, run `npm run dev` (Vite listens on 0.0.0.0:3000) and browse to
+  `http://<your-LAN-IP>:3000/dev/ticket`.
+- Real card: run the API and SPA, then open `/<slug>/<uniqueId>` for a card
+  whose `cardBucket` ≠ 0 (bucket 0 is the classic-card holdout).
+
+**Owner prerequisites (not code)**
+- Run migrations 0012–0015 on deploy.
+- GCS bucket CORS (`infra/README.md`) so uploaded backgrounds can be sampled.
+- Google Wallet: issuer account + service account + env vars
+  (`infra/README.md`). The feature is hidden until configured.
+- The game is **off** per campaign until enabled in the editor ("Weekly scratch
+  game").
+- Holdout: 10 % of cards see the classic card. After ~6 weeks, read the
+  experiment card in Analytics, then set `VITE_CARD_FX_HOLDOUT=off` (and
+  `GAME_HOLDOUT=off` on the API) to give everyone the new card.
+- Real-device pass: iPhone Safari, mid-range Android (haptics, gyro tilt, 60 fps).
+
 ---
 
 ## 1. Decisions
