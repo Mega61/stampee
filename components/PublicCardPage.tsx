@@ -1,7 +1,7 @@
 // Public loyalty card route (/:slug/:uniqueId). Data + experiment arm live
 // here; the animated card is a lazy chunk (components/card/PublicCardView).
 // OWNER after Wave 0: agent D (data hooks).
-import React, { Suspense, lazy, useMemo } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { LoyaltyCard } from './LoyaltyCard';
 import { PublicCardShell } from './PublicCardShell';
@@ -29,14 +29,30 @@ export const PublicCardPage: React.FC = () => {
     () => (fxDisabled() || (uniqueId && isFxHoldout(uniqueId)) ? 'holdout' : 'fx'),
     [uniqueId],
   );
+  // Holdout arm: classic card, no "since your last visit" moments — but it
+  // still reports views (variant 'holdout') so the experiment can compare.
   const seen = useSeenState(variant === 'fx' ? data?.card ?? null : null, data?.template ?? null);
-  const { trackInteraction } = useEngagementBeacon({
+  const { trackInteraction, sessionId } = useEngagementBeacon({
     slug,
     uniqueId,
     variant,
     sawNewStamps: seen.sawNewStamps,
     enabled: !!data,
   });
+
+  // DEV-only handle for integration checks (stripped from production builds).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as unknown as { __stampeeCard?: unknown }).__stampeeCard = {
+      variant,
+      sessionId,
+      card: data?.card ?? null,
+      events: seen.newStampEvents,
+      sawNewStamps: seen.sawNewStamps,
+      acknowledge: seen.acknowledge,
+      refresh,
+    };
+  }, [variant, sessionId, data, seen.newStampEvents, seen.sawNewStamps, seen.acknowledge, refresh]);
 
   if (loading && !data) return <Spinner />;
 
