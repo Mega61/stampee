@@ -178,9 +178,9 @@ card asks `GET /public/wallet/config` and shows no button while it says
 4. **Key.** Create a JSON key for that service account and copy its
    `private_key` (the `-----BEGIN PRIVATE KEY-----…` PEM) into
    `GOOGLE_WALLET_SA_KEY`. One line with `\n` escapes is fine; quote it. The
-   key is needed to sign the "save" link. Note: the org policy
-   `iam.disableServiceAccountKeyCreation` blocks key creation in `gbs-infra`,
-   so create this service account in a project with an exception to it.
+   key is needed to sign the "save" link. Production uses the service account
+   `stampee-wallet@gbs-infra.iam.gserviceaccount.com` (Wallet API enabled on
+   `gbs-infra`, where `iam.disableServiceAccountKeyCreation` is not enforced).
 5. **Optional:** `GOOGLE_WALLET_CLASS_PREFIX` (default `stampee`) namespaces
    class/object ids — use a different one for staging if it shares the issuer.
 6. Restart the API. Until Google approves the issuer for production, only
