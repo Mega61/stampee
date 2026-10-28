@@ -31,3 +31,4 @@ infra/.env.postgres
 *.sln
 *.sw?
 scratch/
+.claude/worktrees/

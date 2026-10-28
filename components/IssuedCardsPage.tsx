@@ -1,3 +1,4 @@
+import { withCardSource } from '../lib/whatsappMessages';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -604,7 +605,7 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
 
   const buildNudgeMessage = (row: CardInsight) => {
     const firstName = row.customer.name.split(' ')[0] ?? '';
-    const link = currentOwner?.slug ? ` ${buildPublicCardUrl(currentOwner.slug, row.card.uniqueId)}` : '';
+    const link = currentOwner?.slug ? ` ${withCardSource(buildPublicCardUrl(currentOwner.slug, row.card.uniqueId), 'whatsapp')}` : '';
     if (row.stage === 'ready') {
       return `¡Hola ${firstName}! Ya completaste tu tarjeta ${row.card.campaignName}. Tu ${row.template.rewardName} te espera en Golden Beauty Studio.${link}`;
     }
