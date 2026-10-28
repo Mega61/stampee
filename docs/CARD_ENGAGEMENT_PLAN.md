@@ -25,7 +25,7 @@ rows, weekly game win → bonus transaction → stamp lands.
   whose `cardBucket` ≠ 0 (bucket 0 is the classic-card holdout).
 
 **Owner prerequisites (not code)**
-- Run migrations 0012–0015 on deploy.
+- Run migrations 0012–0016 on deploy.
 - GCS bucket CORS (`infra/README.md`) so uploaded backgrounds can be sampled.
 - Google Wallet: issuer account + service account + env vars
   (`infra/README.md`). Hidden until configured.
