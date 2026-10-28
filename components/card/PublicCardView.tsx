@@ -58,10 +58,14 @@ export const PublicCardView: React.FC<PublicCardViewProps> = (props) => {
   // driven by the moments layer. New events that arrive later (live refresh)
   // are added on top.
   const [slotStates, setSlotStates] = useState(() => initialSlotStates(props.newStampEvents));
-  const seededEventIds = useRef(new Set(props.newStampEvents.map((e) => e.id)));
-  const lateEvents = props.newStampEvents.filter((e) => !seededEventIds.current.has(e.id));
+  // Ids already seeded, tracked in state (not a ref) so StrictMode's double
+  // render can't drop an update. Late events (live refresh) are seeded during
+  // render — React's "adjust state on prop change" pattern — so their slots
+  // never flash filled before the moment plays.
+  const [seededIds, setSeededIds] = useState(() => new Set(props.newStampEvents.map((e) => e.id)));
+  const lateEvents = props.newStampEvents.filter((e) => !seededIds.has(e.id));
   if (lateEvents.length > 0) {
-    lateEvents.forEach((e) => seededEventIds.current.add(e.id));
+    setSeededIds((prev) => new Set([...prev, ...lateEvents.map((e) => e.id)]));
     setSlotStates((prev) => ({ ...prev, ...initialSlotStates(lateEvents) }));
   }
 
