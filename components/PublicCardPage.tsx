@@ -25,9 +25,13 @@ const Spinner = () => (
 export const PublicCardPage: React.FC = () => {
   const { slug, uniqueId } = useParams<{ slug: string; uniqueId: string }>();
   const { loading, data, refresh, applyCardUpdate } = usePublicCard(slug, uniqueId);
+  // The experiment arm comes from the card id only. The kill switch also
+  // renders the classic card, but those views must not be counted as
+  // holdout, so the beacon is off while it's active.
+  const killSwitch = fxDisabled();
   const variant: CardVariant = useMemo(
-    () => (fxDisabled() || (uniqueId && isFxHoldout(uniqueId)) ? 'holdout' : 'fx'),
-    [uniqueId],
+    () => (killSwitch || (uniqueId && isFxHoldout(uniqueId)) ? 'holdout' : 'fx'),
+    [killSwitch, uniqueId],
   );
   // Holdout arm: classic card, no "since your last visit" moments — but it
   // still reports views (variant 'holdout') so the experiment can compare.
@@ -37,7 +41,7 @@ export const PublicCardPage: React.FC = () => {
     uniqueId,
     variant,
     sawNewStamps: seen.sawNewStamps,
-    enabled: !!data,
+    enabled: !!data && !killSwitch,
   });
 
   // DEV-only handle for integration checks (stripped from production builds).
