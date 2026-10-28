@@ -28,6 +28,9 @@ const campaignValuesFromBody = (body: CampaignBody, ownerId: string, id: string)
   social: body.social ?? null,
   // Only written when sent, so clients that predate it don't reset it.
   ...(body.fxStyle ? { fx_style: body.fxStyle } : {}),
+  ...(body.gameEnabled !== undefined ? { game_enabled: body.gameEnabled } : {}),
+  ...(body.gameWinPct !== undefined ? { game_win_pct: body.gameWinPct } : {}),
+  ...(body.gameMonthlyCap !== undefined ? { game_monthly_cap: body.gameMonthlyCap } : {}),
 });
 
 export const campaignRoutes: FastifyPluginAsync = async (app) => {

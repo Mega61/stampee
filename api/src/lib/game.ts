@@ -3,6 +3,8 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import type { Database } from '../db/types.js';
+import { onCardChanged } from './cardEvents.js';
+import { toTransactionDto, type TransactionRow } from './dto.js';
 import { cardBucket, GAME_HOLDOUT_BUCKET } from './holdout.js';
 import { isoWeekKey, monthStart, nextWeekStart } from './period.js';
 
@@ -16,12 +18,15 @@ export interface GameState {
   reason?: GameLockReason;
   lastResult?: { won: boolean; stampsAwarded: number; playedAt: string };
 }
+export type TransactionDto = ReturnType<typeof toTransactionDto>;
 export interface PlayResult {
   won: boolean;
   stampsAwarded: number;
   stamps: number;
   nextPlayAt: string;
   periodKey: string;
+  /** On a win: the bonus transaction it created (same on idempotent replays). */
+  transaction?: TransactionDto;
 }
 
 export type GameUnavailableReason = 'DISABLED' | 'HOLDOUT' | GameLockReason;
@@ -88,6 +93,26 @@ const findPlay = (db: Db, cardId: string, periodKey: string) =>
     .where('card_id', '=', cardId)
     .where('period_key', '=', periodKey)
     .executeTakeFirst();
+
+/**
+ * The bonus transaction a winning play created. Written in the same
+ * transaction with `timestamp = played_at`, so match on that (±1 s keeps
+ * it robust to rounding).
+ */
+const findBonusTx = async (db: Db, cardId: string, playedAt: Date) => {
+  const at = new Date(playedAt).getTime();
+  const row = await db
+    .selectFrom('transactions')
+    .selectAll()
+    .where('card_id', '=', cardId)
+    .where('type', '=', 'bonus')
+    .where('timestamp', '>=', at - 1000)
+    .where('timestamp', '<=', at + 1000)
+    .orderBy('timestamp', 'asc')
+    .limit(1)
+    .executeTakeFirst();
+  return row ? toTransactionDto({ ...(row as unknown as TransactionRow), timestamp: Number(row.timestamp) }) : undefined;
+};
 
 const hasRecentVisit = async (db: Db, cardId: string, now: Date) => {
   const row = await db
@@ -174,8 +199,21 @@ export const playGame = async (
   ownerId: string,
   uniqueId: string,
   now = new Date(),
-): Promise<PlayOutcome> =>
-  db.transaction().execute(async (trx): Promise<PlayOutcome> => {
+): Promise<PlayOutcome> => {
+  const outcome = await playGameTx(db, ownerId, uniqueId, now);
+  if (!outcome.ok) return outcome;
+  // After commit: a new win changed the card (Wallet pass sync etc.).
+  if (outcome.fresh && outcome.result.won) onCardChanged(outcome.cardId);
+  return { ok: true, result: outcome.result };
+};
+
+type TxOutcome =
+  | { ok: true; result: PlayResult; cardId: string; fresh: boolean }
+  | { ok: false; reason: GameUnavailableReason }
+  | { ok: false; reason: 'NOT_FOUND' };
+
+const playGameTx = async (db: Db, ownerId: string, uniqueId: string, now: Date): Promise<TxOutcome> =>
+  db.transaction().execute(async (trx): Promise<TxOutcome> => {
     const card = (await trx
       .selectFrom('issued_cards')
       .select(['id', 'unique_id', 'owner_id', 'status', 'stamps', 'template_snapshot', 'campaign_id'])
@@ -187,10 +225,25 @@ export const playGame = async (
 
     const periodKey = isoWeekKey(now);
     const nextPlayAt = nextWeekStart(now).toISOString();
-    const stored = (play: { won: boolean; stamps_awarded: number }, stamps: number): PlayOutcome => ({
-      ok: true,
-      result: { won: play.won, stampsAwarded: play.stamps_awarded, stamps, nextPlayAt, periodKey },
-    });
+    const stored = async (
+      play: { won: boolean; stamps_awarded: number; played_at: Date },
+      stamps: number,
+    ): Promise<TxOutcome> => {
+      const transaction = play.won ? await findBonusTx(trx, card.id, play.played_at) : undefined;
+      return {
+        ok: true,
+        cardId: card.id,
+        fresh: false,
+        result: {
+          won: play.won,
+          stampsAwarded: play.stamps_awarded,
+          stamps,
+          nextPlayAt,
+          periodKey,
+          ...(transaction ? { transaction } : {}),
+        },
+      };
+    };
 
     const existing = await findPlay(trx, card.id, periodKey);
     if (existing) return stored(existing, card.stamps);
@@ -233,33 +286,37 @@ export const playGame = async (
     }
 
     let stamps = card.stamps;
+    let transaction: TransactionDto | undefined;
     if (won) {
       stamps += 1;
       // Not a visit: last_visit stays untouched.
       await trx.updateTable('issued_cards').set({ stamps }).where('id', '=', card.id).execute();
-      await trx
-        .insertInto('transactions')
-        .values({
-          id: randomUUID(),
-          card_id: card.id,
-          type: 'bonus',
-          amount: 1,
-          date: now.toLocaleString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric',
-            hour: 'numeric', minute: '2-digit', hour12: true,
-          }),
-          timestamp: now.getTime(),
-          title: 'Bonus Stamp',
-          remarks: 'Raspa y gana',
-          actor_id: null,
-          actor_name: 'Raspa y gana',
-          actor_role: 'system',
-        })
-        .execute();
-      // TODO(wallet): onCardChanged(cardId)
+      const row: TransactionRow = {
+        id: randomUUID(),
+        card_id: card.id,
+        type: 'bonus',
+        amount: 1,
+        date: now.toLocaleString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric',
+          hour: 'numeric', minute: '2-digit', hour12: true,
+        }),
+        timestamp: now.getTime(),
+        title: 'Bonus Stamp',
+        remarks: 'Raspa y gana',
+        actor_id: null,
+        actor_name: 'Raspa y gana',
+        actor_role: 'system',
+      };
+      await trx.insertInto('transactions').values(row).execute();
+      transaction = toTransactionDto(row);
     }
 
-    return { ok: true, result: { won, stampsAwarded, stamps, nextPlayAt, periodKey } };
+    return {
+      ok: true,
+      cardId: card.id,
+      fresh: true,
+      result: { won, stampsAwarded, stamps, nextPlayAt, periodKey, ...(transaction ? { transaction } : {}) },
+    };
   });
 
 /** §8.4 estimate: A × p × 4.3 × w, capped by the monthly budget. */
