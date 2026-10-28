@@ -48,7 +48,22 @@ export type FxBusEvents = {
   'stamp:landed': { index: number };
   /** Reward scratch reveal finished. */
   'reward:revealed': Record<string, never>;
+  /** A wrapped (unopened gift) slot was tapped. */
+  'gift:tap': { index: number };
+  /** Play the unwrap animation on a wrapped slot (the grid listens). */
+  'gift:unwrap': { index: number };
+  /** Unwrap finished; the slot now shows its stamp. */
+  'gift:unwrapped': { index: number };
+  /** Particle burst at viewport coordinates (the particle layer listens). */
+  'fx:burst': { x: number; y: number; kind: 'tap' | 'gift' | 'slam' | 'celebrate'; colors?: string[] };
 };
+
+// Division of labor (Wave 1/2):
+// - The grid (agent C) owns slot visuals: tap feedback, the slam itself
+//   ('stamp:slam' → 'stamp:landed'), the wrapped look and the unwrap itself
+//   ('gift:unwrap' → 'gift:unwrapped'), and the particle layer ('fx:burst').
+// - The moments layer (agent E) owns sequencing: which slots play when,
+//   banners/toasts, clearing slotStates, acknowledging events.
 
 export interface FxBus {
   emit<K extends keyof FxBusEvents>(type: K, payload: FxBusEvents[K]): void;
