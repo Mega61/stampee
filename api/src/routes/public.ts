@@ -13,6 +13,7 @@ import {
   type TransactionRow,
 } from '../lib/dto.js';
 import { normalizeSlug } from '../lib/slug.js';
+import { computeGameState, type GameCampaign } from '../lib/game.js';
 import { signedReadUrl } from '../storage/gcs.js';
 
 const PublicSignupBody = z.object({
@@ -63,14 +64,22 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       if (!customer) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
 
       let campaign: Awaited<ReturnType<typeof toCampaignDtoSigned>> | null = null;
+      let gameCampaign: GameCampaign | null = null;
       if (card.campaign_id) {
         const campaignRow = (await db
           .selectFrom('campaigns')
           .selectAll()
           .where('id', '=', card.campaign_id)
-          .executeTakeFirst()) as CampaignRow | undefined;
-        if (campaignRow) campaign = await toCampaignDtoSigned(campaignRow, signedReadUrl);
+          .executeTakeFirst()) as (CampaignRow & GameCampaign) | undefined;
+        if (campaignRow) {
+          campaign = await toCampaignDtoSigned(campaignRow, signedReadUrl);
+          gameCampaign = campaignRow;
+        }
       }
+
+      // Weekly game folded in to save a round trip; null when there's no game.
+      const gameState = await computeGameState(db, card, gameCampaign);
+      const game = gameState.state === 'disabled' ? null : gameState;
 
       const history = (await db
         .selectFrom('transactions')
@@ -98,6 +107,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           },
           customer: { id: customer.id, name: customer.name },
           campaign,
+          game,
         },
       };
     },
