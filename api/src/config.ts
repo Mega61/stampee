@@ -38,6 +38,23 @@ const Env = z.object({
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_WORKSPACE_DOMAIN: z.string().default(''),
 
+  // Google Wallet loyalty passes (docs/CARD_ENGAGEMENT_PLAN.md §7.3). The
+  // feature stays off unless issuer id, service-account email and key are all
+  // set. The key is the PEM `private_key` from the service-account JSON; `\n`
+  // escapes (as found in the JSON / one-line env files) are accepted.
+  GOOGLE_WALLET_ISSUER_ID: z.string().trim().default(''),
+  GOOGLE_WALLET_SA_EMAIL: z.string().trim().default(''),
+  GOOGLE_WALLET_SA_KEY: z
+    .string()
+    .default('')
+    .transform((v) => v.replace(/\\n/g, '\n').trim()),
+  GOOGLE_WALLET_CLASS_PREFIX: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, "_" and "-" only')
+    .default('stampee')
+    .transform((v) => v || 'stampee'),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 

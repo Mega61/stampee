@@ -11,6 +11,7 @@ import {
 } from '../lib/dto.js';
 import { IssueCardBody, UpdateCardBody, TransactionBody, GiftStampsBody } from '../schemas/cards.js';
 import { randomUUID } from 'node:crypto';
+import { onCardChanged } from '../lib/cardEvents.js';
 
 export const cardRoutes: FastifyPluginAsync = async (app) => {
   // GET /cards/count
@@ -113,6 +114,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
         .set(updates)
         .where('id', '=', req.params.id)
         .execute();
+      onCardChanged(req.params.id);
     }
 
     const row = await db
@@ -184,6 +186,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
         actor_role: claims.role,
       })
       .execute();
+    onCardChanged(req.params.id);
     const row = await db
       .selectFrom('transactions')
       .selectAll()
@@ -281,6 +284,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
       }
       return out;
     });
+    for (const r of results) if (r.added > 0) onCardChanged(r.cardId);
 
     return {
       ok: true,
