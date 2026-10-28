@@ -29,6 +29,9 @@ import { walletRoutes } from './routes/wallet.js';
 
 export const buildApp = async () => {
   const app = Fastify({
+    // Behind Caddy every request comes from the proxy's IP; trust exactly the
+    // configured hops so per-IP rate limits see the real client.
+    trustProxy: env.TRUST_PROXY_HOPS ?? (env.NODE_ENV === 'production' ? 1 : 0),
     logger: {
       level: env.LOG_LEVEL,
       transport:

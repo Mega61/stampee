@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/kysely.js';
+import { sql } from 'kysely';
 import { AppError } from '../lib/errors.js';
 import { requireRole } from '../middleware/requireRole.js';
 import {
@@ -103,7 +104,11 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
     if (!existing) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
 
     const updates: Record<string, unknown> = {};
-    if (body.stamps !== undefined) updates['stamps'] = body.stamps;
+    if (body.stampsDelta !== undefined) {
+      updates['stamps'] = sql`greatest(0, stamps + ${body.stampsDelta})`;
+    } else if (body.stamps !== undefined) {
+      updates['stamps'] = body.stamps;
+    }
     if (body.status !== undefined) updates['status'] = body.status;
     if (body.completedDate !== undefined) updates['completed_date'] = body.completedDate;
     if (body.lastVisit !== undefined) updates['last_visit'] = body.lastVisit;

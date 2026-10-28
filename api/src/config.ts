@@ -55,6 +55,11 @@ const Env = z.object({
     .default('stampee')
     .transform((v) => v || 'stampee'),
 
+  // Reverse-proxy hops in front of the API (Caddy = 1). Rate limits key on the
+  // client IP, which is only correct when the proxy's X-Forwarded-For is
+  // trusted. Defaults to 1 in production, 0 otherwise.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).optional(),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 

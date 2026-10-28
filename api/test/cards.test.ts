@@ -120,6 +120,31 @@ describe('cards: issue + stamp + redeem lifecycle', () => {
     expect(card.completedDate).toBe('2026-01-15');
   });
 
+  it('PATCH /cards/:id stampsDelta applies on top of concurrent changes', async () => {
+    const issueRes = await rig.app.inject({
+      method: 'POST',
+      url: '/cards',
+      payload: { customerId, campaignId },
+      headers: { 'content-type': 'application/json', ...withSession(session) },
+    });
+    const cardId = issueRes.json().data.id as string;
+    // Someone else (e.g. a scratch-game win) bumps the card to 3 meanwhile.
+    await db.pool.query('update loyalty.issued_cards set stamps = 3 where id = $1', [cardId]);
+
+    const patch = (payload: object) =>
+      rig.app.inject({
+        method: 'PATCH',
+        url: `/cards/${cardId}`,
+        payload,
+        headers: { 'content-type': 'application/json', ...withSession(session) },
+      });
+    const res = await patch({ stampsDelta: 1 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.stamps).toBe(4);
+    // Never below zero.
+    expect((await patch({ stampsDelta: -10 })).json().data.stamps).toBe(0);
+  });
+
   it('POST /cards on a disabled campaign → 409 CAMPAIGN_DISABLED', async () => {
     const disabledId = await insertCampaign(db.pool, owner.userId, {
       name: 'Old Promo',

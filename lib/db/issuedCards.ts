@@ -40,11 +40,14 @@ export async function insertIssuedCard(
 
 export async function updateIssuedCard(
   cardId: string,
-  updates: Partial<Pick<IssuedCard, 'stamps' | 'status' | 'completedDate' | 'lastVisit'>>,
-): Promise<{ ok: boolean; error?: string }> {
+  updates: Partial<Pick<IssuedCard, 'stamps' | 'status' | 'completedDate' | 'lastVisit'>> & {
+    /** Atomic relative change; wins over `stamps` on the server. */
+    stampsDelta?: number;
+  },
+): Promise<{ ok: boolean; error?: string; stamps?: number }> {
   try {
-    await api.patch(`/cards/${cardId}`, updates);
-    return { ok: true };
+    const card = await api.patch<{ stamps: number }>(`/cards/${cardId}`, updates);
+    return { ok: true, stamps: card?.stamps };
   } catch (err) {
     const message =
       err instanceof ApiError ? err.message : 'Unable to update this card right now. Please try again.';
