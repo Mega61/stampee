@@ -217,7 +217,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isCompleted, isRedeemed]);
+  }, [isCompleted, isRedeemed, transformGiftAnimation]);
 
   const stampSizing = getStampSizing(totalStamps, {
     compact: sizeVariant === 'compact',
