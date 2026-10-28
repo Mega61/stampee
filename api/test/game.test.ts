@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setupTestDb, type TestDb } from './helpers/db.js';
 import {
   buildTestRig,
@@ -10,6 +10,10 @@ import {
   type TestRig,
 } from './helpers/app.js';
 import { cardBucket, GAME_HOLDOUT_BUCKET } from '../src/lib/holdout.js';
+import { onCardChanged } from '../src/lib/cardEvents.js';
+
+// Wallet sync hook: record calls instead of running it.
+vi.mock('../src/lib/cardEvents.js', () => ({ onCardChanged: vi.fn() }));
 
 let db: TestDb;
 let rig: TestRig;
@@ -49,6 +53,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env.GAME_HOLDOUT;
+  vi.mocked(onCardChanged).mockClear();
 });
 
 const setGame = (id: string, g: { enabled?: boolean; winPct?: number; cap?: number }) =>
@@ -245,6 +250,53 @@ describe('game: play', () => {
     expect(await bonusTxs(card.id)).toHaveLength(0);
     const state = (await getGame(card.uniqueId)).json().data;
     expect(state).toMatchObject({ state: 'played', lastResult: { won: false, stampsAwarded: 0 } });
+  });
+
+  it('a win returns the bonus transaction (camelCase DTO), and a replay returns the same one', async () => {
+    const card = await makeCard({ stamps: 3 });
+    const first = (await play(card.uniqueId)).json().data;
+    expect(first.transaction).toMatchObject({
+      type: 'bonus',
+      amount: 1,
+      title: 'Bonus Stamp',
+      remarks: 'Raspa y gana',
+      actorName: 'Raspa y gana',
+      actorRole: 'system',
+    });
+    expect(typeof first.transaction.id).toBe('string');
+    expect(typeof first.transaction.timestamp).toBe('number');
+    const [tx] = await bonusTxs(card.id);
+    expect(first.transaction.id).toBe(tx.id);
+
+    const replay = (await play(card.uniqueId)).json().data;
+    expect(replay.transaction).toEqual(first.transaction);
+
+    // The public card's history carries the same id, so a refresh after the
+    // optimistic update doesn't duplicate it.
+    const pub = await rig.app.inject({ method: 'GET', url: `/public/cards/${owner.slug}/${card.uniqueId}`, remoteAddress: nextIp() });
+    const ids = pub.json().data.card.history.filter((t: { type: string }) => t.type === 'bonus').map((t: { id: string }) => t.id);
+    expect(ids).toEqual([first.transaction.id]);
+  });
+
+  it('a loss has no transaction', async () => {
+    await setGame(campaignId, { winPct: 0 });
+    const card = await makeCard({ stamps: 3 });
+    expect((await play(card.uniqueId)).json().data.transaction).toBeUndefined();
+    expect((await play(card.uniqueId)).json().data.transaction).toBeUndefined();
+  });
+
+  it('calls onCardChanged once after a new win, never for losses or replays', async () => {
+    const card = await makeCard({ stamps: 3 });
+    await play(card.uniqueId);
+    expect(onCardChanged).toHaveBeenCalledTimes(1);
+    expect(onCardChanged).toHaveBeenCalledWith(card.id);
+    await play(card.uniqueId);
+    expect(onCardChanged).toHaveBeenCalledTimes(1);
+
+    await setGame(campaignId, { winPct: 0 });
+    const loser = await makeCard({ stamps: 3 });
+    await play(loser.uniqueId);
+    expect(onCardChanged).toHaveBeenCalledTimes(1);
   });
 
   it('only one play per week: a second call returns the same result', async () => {
@@ -494,5 +546,58 @@ describe('game: owner estimate', () => {
     const headers = await login('other@example.com');
     const res = await rig.app.inject({ method: 'GET', url: `/campaigns/${campaignId}/game-estimate`, headers });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('game: campaign settings', () => {
+  const headers = async () => {
+    const s = new Session();
+    s.captureFromResponse(
+      await rig.app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'owner@example.com', password: 'hunter2bravo' },
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    return { 'content-type': 'application/json', cookie: s.cookieJarHeader() ?? '' };
+  };
+  const payload = (overrides: Record<string, unknown> = {}) => ({
+    name: 'Facial',
+    rewardName: 'Facial gratis',
+    iconKey: 'Sparkles',
+    colors: { background: '#ffffff' },
+    totalStamps: 10,
+    ...overrides,
+  });
+
+  it('defaults to off, 15 %, cap 30', async () => {
+    const res = await rig.app.inject({ method: 'POST', url: '/campaigns', payload: payload(), headers: await headers() });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toMatchObject({ gameEnabled: false, gameWinPct: 15, gameMonthlyCap: 30 });
+  });
+
+  it('persists the game fields, keeps them when omitted, and validates ranges', async () => {
+    const h = await headers();
+    const put = (body: Record<string, unknown>) =>
+      rig.app.inject({ method: 'PUT', url: '/campaigns/game-campaign', payload: body, headers: h });
+
+    const created = await put(payload({ gameEnabled: true, gameWinPct: 25, gameMonthlyCap: 12 }));
+    expect(created.statusCode).toBe(200);
+    expect(created.json().data).toMatchObject({ gameEnabled: true, gameWinPct: 25, gameMonthlyCap: 12 });
+
+    const renamed = await put(payload({ name: 'Renamed' }));
+    expect(renamed.json().data).toMatchObject({ name: 'Renamed', gameEnabled: true, gameWinPct: 25, gameMonthlyCap: 12 });
+
+    const off = await put(payload({ gameEnabled: false }));
+    expect(off.json().data.gameEnabled).toBe(false);
+
+    expect((await put(payload({ gameWinPct: 101 }))).statusCode).toBe(400);
+    expect((await put(payload({ gameWinPct: 10.5 }))).statusCode).toBe(400);
+    expect((await put(payload({ gameMonthlyCap: -1 }))).statusCode).toBe(400);
+
+    const list = await rig.app.inject({ method: 'GET', url: '/campaigns', headers: h });
+    const row = (list.json().data as Array<{ id: string; gameWinPct: number }>).find((c) => c.id === 'game-campaign');
+    expect(row?.gameWinPct).toBe(25);
   });
 });

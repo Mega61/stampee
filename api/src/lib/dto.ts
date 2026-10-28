@@ -20,6 +20,9 @@ export type CampaignRow = {
   bonus_stamps: number | null;
   social: Record<string, unknown> | null;
   fx_style?: 'elegant' | 'playful' | 'minimal' | null;
+  game_enabled?: boolean | null;
+  game_win_pct?: number | null;
+  game_monthly_cap?: number | null;
   created_at: Date | string;
 };
 
@@ -41,6 +44,9 @@ export const toCampaignDto = (r: CampaignRow) => ({
   bonusStamps: r.bonus_stamps ?? 0,
   social: r.social ?? undefined,
   fxStyle: r.fx_style ?? 'elegant',
+  gameEnabled: r.game_enabled ?? false,
+  gameWinPct: r.game_win_pct ?? 15,
+  gameMonthlyCap: r.game_monthly_cap ?? 30,
 });
 
 // Same shape as toCampaignDto, but converts logo_image / background_image

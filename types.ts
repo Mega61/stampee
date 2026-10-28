@@ -183,4 +183,6 @@ export interface PlayResult {
   stamps: number;
   nextPlayAt: string;
   periodKey: string;
+  /** On a win: the bonus transaction it created (also on idempotent replays). */
+  transaction?: Transaction;
 }

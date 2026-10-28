@@ -32,6 +32,10 @@ export const CampaignBody = z
     // Card animation energy (docs/CARD_ENGAGEMENT_PLAN.md §5.0). Omitted on
     // update keeps the stored value; omitted on create uses the DB default.
     fxStyle: z.enum(FX_STYLES).optional(),
+    // Weekly scratch game (§8). Same rule: omitted keeps the stored value.
+    gameEnabled: z.boolean().optional(),
+    gameWinPct: z.number().int().min(0).max(100).optional(),
+    gameMonthlyCap: z.number().int().min(0).max(100_000).optional(),
   })
   .refine((c) => (c.bonusStamps ?? 0) < c.totalStamps, {
     message: 'Gift stamps must be fewer than the total number of stamps.',

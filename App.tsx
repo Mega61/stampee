@@ -29,6 +29,7 @@ const ForgotPasswordPage = lazy(() => import('./components/ForgotPasswordPage').
 const DashboardPage = lazy(() => import('./components/DashboardPage').then((module) => ({ default: module.DashboardPage })));
 const PublicCardPage = lazy(() => import('./components/PublicCardPage'));
 const DevCardsPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevCardsPage')) : null;
+const DevTicketPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevTicketPage')) : null;
 const PublicCampaignSignupPage = lazy(() => import('./components/PublicCampaignSignupPage').then((module) => ({ default: module.PublicCampaignSignupPage })));
 
 const RouteLoader: React.FC = () => (
@@ -381,6 +382,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/:slug/join/:campaignId" element={withSuspense(<PublicCampaignSignupPage />)} />
         <Route path="/:slug/:uniqueId" element={withSuspense(<PublicCardPage />)} />
         {DevCardsPage && <Route path="/dev/cards" element={withSuspense(<DevCardsPage />)} />}
+        {DevTicketPage && <Route path="/dev/ticket" element={withSuspense(<DevTicketPage />)} />}
         <Route path="/login" element={withSuspense(<LoginPage />)} />
         <Route path="/forgot-password" element={withSuspense(<ForgotPasswordPage />)} />
 
