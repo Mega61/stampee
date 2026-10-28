@@ -19,6 +19,10 @@ export type CampaignRow = {
   total_stamps: number;
   bonus_stamps: number | null;
   social: Record<string, unknown> | null;
+  fx_style?: 'elegant' | 'playful' | 'minimal' | null;
+  game_enabled?: boolean | null;
+  game_win_pct?: number | null;
+  game_monthly_cap?: number | null;
   created_at: Date | string;
 };
 
@@ -39,6 +43,10 @@ export const toCampaignDto = (r: CampaignRow) => ({
   totalStamps: r.total_stamps,
   bonusStamps: r.bonus_stamps ?? 0,
   social: r.social ?? undefined,
+  fxStyle: r.fx_style ?? 'elegant',
+  gameEnabled: r.game_enabled ?? false,
+  gameWinPct: r.game_win_pct ?? 15,
+  gameMonthlyCap: r.game_monthly_cap ?? 30,
 });
 
 // Same shape as toCampaignDto, but converts logo_image / background_image
@@ -120,7 +128,7 @@ export const toIssuedCardDto = (r: IssuedCardRow) => ({
 export type TransactionRow = {
   id: string;
   card_id: string;
-  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift';
+  type: 'stamp_add' | 'stamp_remove' | 'redeem' | 'issued' | 'gift' | 'bonus';
   amount: number;
   date: string;
   timestamp: number;

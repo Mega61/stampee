@@ -2,6 +2,11 @@ import { z } from 'zod';
 import 'dotenv/config';
 
 const timeWindow = z.string().regex(/^\d+(ms|s|m|h|d)$/, 'expected a duration like 15m or 30d');
+// PEM blobs in env files: accept one line with `\n` escapes.
+const pem = z
+  .string()
+  .default('')
+  .transform((v) => v.replace(/\\n/g, '\n').trim());
 
 const Env = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -37,6 +42,44 @@ const Env = z.object({
 
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_WORKSPACE_DOMAIN: z.string().default(''),
+
+  // Google Wallet loyalty passes (docs/CARD_ENGAGEMENT_PLAN.md §7.3). The
+  // feature stays off unless issuer id, service-account email and key are all
+  // set. The key is the PEM `private_key` from the service-account JSON; `\n`
+  // escapes (as found in the JSON / one-line env files) are accepted.
+  GOOGLE_WALLET_ISSUER_ID: z.string().trim().default(''),
+  GOOGLE_WALLET_SA_EMAIL: z.string().trim().default(''),
+  GOOGLE_WALLET_SA_KEY: z
+    .string()
+    .default('')
+    .transform((v) => v.replace(/\\n/g, '\n').trim()),
+  GOOGLE_WALLET_CLASS_PREFIX: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, "_" and "-" only')
+    .default('stampee')
+    .transform((v) => v || 'stampee'),
+
+  // Apple Wallet passes (docs/CARD_ENGAGEMENT_PLAN.md §7.3). Off unless the
+  // pass type id, team id, Pass Type ID certificate + key and the Apple WWDR
+  // (G4) certificate are all set. PEMs accept `\n` escapes like
+  // GOOGLE_WALLET_SA_KEY. The same certificate authenticates APNs pushes.
+  APPLE_PASS_TYPE_ID: z.string().trim().default(''),
+  APPLE_TEAM_ID: z.string().trim().default(''),
+  APPLE_PASS_CERT: pem,
+  APPLE_PASS_KEY: pem,
+  APPLE_PASS_KEY_PASSPHRASE: z.string().default(''),
+  APPLE_WWDR_CERT: pem,
+  APPLE_APNS_HOST: z
+    .string()
+    .trim()
+    .default('api.push.apple.com')
+    .transform((v) => v || 'api.push.apple.com'),
+
+  // Reverse-proxy hops in front of the API (Caddy = 1). Rate limits key on the
+  // client IP, which is only correct when the proxy's X-Forwarded-For is
+  // trusted. Defaults to 1 in production, 0 otherwise.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).optional(),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });

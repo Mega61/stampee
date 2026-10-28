@@ -21,9 +21,18 @@ import { cardRoutes } from './routes/cards.js';
 import { publicRoutes } from './routes/public.js';
 import { storageRoutes } from './routes/storage.js';
 import { apiKeyRoutes } from './routes/apiKeys.js';
+import { publicViewsRoutes } from './routes/publicViews.js';
+import { analyticsEngagementRoutes } from './routes/analyticsEngagement.js';
+import { publicPwaRoutes } from './routes/publicPwa.js';
+import { publicGameRoutes } from './routes/publicGame.js';
+import { walletRoutes } from './routes/wallet.js';
+import { appleWalletRoutes } from './routes/appleWallet.js';
 
 export const buildApp = async () => {
   const app = Fastify({
+    // Behind Caddy every request comes from the proxy's IP; trust exactly the
+    // configured hops so per-IP rate limits see the real client.
+    trustProxy: env.TRUST_PROXY_HOPS ?? (env.NODE_ENV === 'production' ? 1 : 0),
     logger: {
       level: env.LOG_LEVEL,
       transport:
@@ -100,6 +109,13 @@ export const buildApp = async () => {
   await app.register(publicRoutes);
   await app.register(storageRoutes);
   await app.register(apiKeyRoutes);
+  // Customer card engagement (docs/CARD_ENGAGEMENT_PLAN.md).
+  await app.register(publicViewsRoutes);
+  await app.register(analyticsEngagementRoutes);
+  await app.register(publicPwaRoutes);
+  await app.register(publicGameRoutes);
+  await app.register(walletRoutes);
+  await app.register(appleWalletRoutes);
 
   return app;
 };

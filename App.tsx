@@ -1,11 +1,10 @@
 import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { Sidebar, NAV_ITEMS, SidebarContent } from './components/Sidebar';
-import { Template, Customer, IssuedCard } from './types';
+import { Template, Customer } from './types';
 import { templates } from './data/templates';
 import { BrowserRouter, Routes, Route, Outlet, useParams, useNavigate, Navigate, useSearchParams, useLocation } from 'react-router-dom';
-import { Lock } from 'lucide-react';
 import { toStoredTemplate, fromStoredTemplate } from './lib/templateSerialization';
-import { cn, hexToRgba, resolveHexAndOpacity } from './lib/utils';
+import { cn } from './lib/utils';
 import { AuthProvider, useAuth } from './components/AuthProvider';
 import { RequireAuth } from './components/RequireAuth';
 import { RequireRole } from './components/RequireRole';
@@ -13,43 +12,7 @@ import { VerifyBanner } from './components/VerifyBanner';
 import { fetchCampaigns, upsertCampaign, deleteCampaign as dbDeleteCampaign, setCampaignEnabled } from './lib/db/campaigns';
 import { fetchCustomersWithCards } from './lib/db/customers';
 import { fetchPublicScanEntryContext } from './lib/db/issuedCards';
-import { buildIssuedCardsKioskUrl, buildStaffPortalUrl, buildStaffScanEntryUrl } from './lib/links';
-import { api } from './lib/api';
-
-const normalizeHexColor = (value: string) => {
-  const normalized = value.replace('#', '').trim();
-  if (normalized.length === 3) {
-    return `#${normalized.split('').map((char) => `${char}${char}`).join('')}`;
-  }
-  if (normalized.length === 6) {
-    return `#${normalized}`;
-  }
-  return '#ffffff';
-};
-
-const mixHexColors = (base: string, target: string, weight: number) => {
-  const source = normalizeHexColor(base);
-  const destination = normalizeHexColor(target);
-  const ratio = Math.min(1, Math.max(0, weight));
-  const parseChannel = (hex: string, start: number) => Number.parseInt(hex.slice(start, start + 2), 16);
-  const blendChannel = (from: number, to: number) => Math.round(from + (to - from) * ratio);
-
-  const r = blendChannel(parseChannel(source, 1), parseChannel(destination, 1));
-  const g = blendChannel(parseChannel(source, 3), parseChannel(destination, 3));
-  const b = blendChannel(parseChannel(source, 5), parseChannel(destination, 5));
-
-  return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
-};
-
-const getHexLuminance = (value: string) => {
-  const normalized = normalizeHexColor(value);
-  const channels = [1, 3, 5].map((start) => Number.parseInt(normalized.slice(start, start + 2), 16) / 255);
-  const [r, g, b] = channels.map((channel) => (
-    channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4)
-  ));
-
-  return (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
-};
+import { buildIssuedCardsKioskUrl, buildStaffPortalUrl } from './lib/links';
 
 const LoyaltyCard = lazy(() => import('./components/LoyaltyCard').then((module) => ({ default: module.LoyaltyCard })));
 const CardEditor = lazy(() => import('./components/CardEditor').then((module) => ({ default: module.CardEditor })));
@@ -64,6 +27,9 @@ const StaffLoginPage = lazy(() => import('./components/StaffLoginPage').then((mo
 const SettingsPage = lazy(() => import('./components/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 const ForgotPasswordPage = lazy(() => import('./components/ForgotPasswordPage').then((module) => ({ default: module.ForgotPasswordPage })));
 const DashboardPage = lazy(() => import('./components/DashboardPage').then((module) => ({ default: module.DashboardPage })));
+const PublicCardPage = lazy(() => import('./components/PublicCardPage'));
+const DevCardsPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevCardsPage')) : null;
+const DevTicketPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevTicketPage')) : null;
 const PublicCampaignSignupPage = lazy(() => import('./components/PublicCampaignSignupPage').then((module) => ({ default: module.PublicCampaignSignupPage })));
 
 const RouteLoader: React.FC = () => (
@@ -90,131 +56,6 @@ const TitleManager: React.FC = () => {
   }, [location.pathname]);
 
   return null;
-};
-
-const PublicCardWrapper: React.FC = () => {
-  const { slug, uniqueId } = useParams<{ slug: string; uniqueId: string }>();
-  const [loading, setLoading] = useState(true);
-  const [cardData, setCardData] = useState<{
-    card: IssuedCard;
-    customer: Customer;
-    template: Template;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!slug || !uniqueId) { setLoading(false); return; }
-    (async () => {
-      try {
-        const data = await api.get<{
-          card: IssuedCard;
-          customer: { id: string; name: string };
-          campaign: Record<string, unknown> | null;
-        }>(`/public/cards/${slug}/${uniqueId}`);
-
-        const card: IssuedCard = {
-          ...data.card,
-          history: data.card.history ?? [],
-        };
-
-        const customer: Customer = {
-          id: data.customer.id,
-          name: data.customer.name,
-          email: '',
-          status: 'Active',
-          cards: [card],
-        };
-
-        let template: Template | undefined;
-        if (card.templateSnapshot) {
-          template = fromStoredTemplate(card.templateSnapshot);
-        } else if (data.campaign) {
-          // API already returns the campaign in camelCase StoredTemplate shape.
-          template = fromStoredTemplate(data.campaign as Parameters<typeof fromStoredTemplate>[0]);
-        }
-
-        if (template) setCardData({ card, customer, template });
-      } catch {
-        // surface as "Card not found" below
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [slug, uniqueId]);
-
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  if (!cardData) {
-    return (
-      <div className="h-screen flex items-center justify-center px-6 text-center text-muted-foreground">
-        Tarjeta no encontrada.
-      </div>
-    );
-  }
-
-  const { card, customer, template } = cardData;
-  const isRedeemed = card.status === 'Redeemed';
-  const cardBackgroundHex = resolveHexAndOpacity(template.colors.background, '#f5f5f5').hex;
-  const isDarkBackground = getHexLuminance(cardBackgroundHex) < 0.38;
-  const pageBackground = mixHexColors(cardBackgroundHex, isDarkBackground ? '#0b0b0d' : '#ffffff', isDarkBackground ? 0.64 : 0.22);
-  const shellBackground = mixHexColors(cardBackgroundHex, isDarkBackground ? '#1a1a1d' : '#ffffff', isDarkBackground ? 0.28 : 0.1);
-  const haloColor = hexToRgba(cardBackgroundHex, isDarkBackground ? 0.44 : 0.28);
-
-  return (
-    <div
-      className="min-h-screen w-full relative flex flex-col items-center justify-center animate-fade-in md:px-8 md:py-8"
-      style={{
-        backgroundColor: pageBackground,
-        backgroundImage: `radial-gradient(circle at top, ${hexToRgba(shellBackground, 0.42)} 0%, transparent 42%)`
-      }}
-    >
-      <div className="w-full min-h-[100dvh] flex items-center justify-center p-0 relative md:min-h-0">
-      <div className={cn(
-          "w-full h-[100dvh] md:h-[min(940px,calc(100dvh-2rem))] md:w-[min(436px,calc((100dvh-2rem)*0.4638))] md:max-w-full md:overflow-hidden md:rounded-[3.6rem] md:ring-1 md:ring-black/5",
-          isRedeemed && "opacity-50 grayscale-[0.6] pointer-events-none"
-        )}
-        style={{
-          backgroundColor: shellBackground,
-          boxShadow: `0 34px 96px -42px ${haloColor}, 0 18px 40px -28px rgba(15, 23, 42, 0.3)`
-        }}
-      >
-          {withSuspense(
-            <LoyaltyCard
-              template={template}
-              mode="public"
-              readOnly={true}
-              currentStamps={card.stamps}
-              customerName={customer.name}
-              cardId={card.uniqueId}
-              qrValue={buildStaffScanEntryUrl(slug ?? '', card.uniqueId)}
-              className="h-full w-full"
-              history={card.history}
-              isRedeemed={isRedeemed}
-            />
-          )}
-      </div>
-        {isRedeemed && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center">
-            <div className="mx-6 w-full max-w-sm rounded-2xl bg-white/90 backdrop-blur-md shadow-xl border border-gray-200 p-6 text-center">
-              <div className="mx-auto mb-3 h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
-                <Lock size={22} className="text-gray-600" />
-              </div>
-              <h2 className="text-xl font-bold text-gray-900">Canjeada</h2>
-              <p className="mt-1 text-sm text-gray-600">Esta tarjeta está cerrada.</p>
-              <div className="mt-3 text-xs text-gray-500 font-mono">
-                ID de tarjeta: {card.uniqueId}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 };
 
 const StaffScanEntryWrapper: React.FC = () => {
@@ -539,7 +380,9 @@ const AppRoutes: React.FC = () => {
         <Route path="/:slug/staff" element={withSuspense(<StaffLoginPage />)} />
         <Route path="/:slug/scan/:uniqueId" element={<StaffScanEntryWrapper />} />
         <Route path="/:slug/join/:campaignId" element={withSuspense(<PublicCampaignSignupPage />)} />
-        <Route path="/:slug/:uniqueId" element={<PublicCardWrapper />} />
+        <Route path="/:slug/:uniqueId" element={withSuspense(<PublicCardPage />)} />
+        {DevCardsPage && <Route path="/dev/cards" element={withSuspense(<DevCardsPage />)} />}
+        {DevTicketPage && <Route path="/dev/ticket" element={withSuspense(<DevTicketPage />)} />}
         <Route path="/login" element={withSuspense(<LoginPage />)} />
         <Route path="/forgot-password" element={withSuspense(<ForgotPasswordPage />)} />
 

@@ -1,3 +1,4 @@
+import { withCardSource } from '../lib/whatsappMessages';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -222,7 +223,11 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
     setMutationBusy(true);
     setMutationError("");
     const dbUpdates: Parameters<typeof updateIssuedCard>[1] = {};
-    if (updates.stamps !== undefined) dbUpdates.stamps = updates.stamps;
+    const knownStamps = customers.find(c => c.id === customerId)?.cards.find(c => c.id === cardId)?.stamps;
+    // Send stamp changes as a delta: the client may have won a scratch-game
+    // stamp since this screen loaded, and an absolute count would erase it.
+    if (updates.stamps !== undefined && knownStamps !== undefined) dbUpdates.stampsDelta = updates.stamps - knownStamps;
+    else if (updates.stamps !== undefined) dbUpdates.stamps = updates.stamps;
     if (updates.status !== undefined) dbUpdates.status = updates.status;
     if (updates.completedDate !== undefined) dbUpdates.completedDate = updates.completedDate;
     if (updates.lastVisit !== undefined) dbUpdates.lastVisit = updates.lastVisit;
@@ -233,6 +238,10 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
         const updateResult = await updateIssuedCard(cardId, dbUpdates);
         if (!updateResult.ok) {
           throw new Error(updateResult.error ?? "Failed to update the card.");
+        }
+        // The server's count is authoritative (includes concurrent changes).
+        if (updates.stamps !== undefined && updateResult.stamps !== undefined) {
+          updates = { ...updates, stamps: updateResult.stamps };
         }
         wroteData = true;
       }
@@ -604,7 +613,7 @@ export const IssuedCardsPage: React.FC<IssuedCardsPageProps> = ({ customers, cam
 
   const buildNudgeMessage = (row: CardInsight) => {
     const firstName = row.customer.name.split(' ')[0] ?? '';
-    const link = currentOwner?.slug ? ` ${buildPublicCardUrl(currentOwner.slug, row.card.uniqueId)}` : '';
+    const link = currentOwner?.slug ? ` ${withCardSource(buildPublicCardUrl(currentOwner.slug, row.card.uniqueId), 'whatsapp')}` : '';
     if (row.stage === 'ready') {
       return `¡Hola ${firstName}! Ya completaste tu tarjeta ${row.card.campaignName}. Tu ${row.template.rewardName} te espera en Golden Beauty Studio.${link}`;
     }

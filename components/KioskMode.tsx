@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Customer, IssuedCard, Template, Transaction } from '../types';
 import { LoyaltyCard } from './LoyaltyCard';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Plus, Gift, History, User, ChevronLeft, Minus, Lock, CheckCircle, RefreshCcw, ShieldCheck, Clock3 } from 'lucide-react';
+import { Plus, Gift, History, User, ChevronLeft, Minus, Lock, CheckCircle, RefreshCcw, ShieldCheck, Clock3, MessageCircle, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAuth } from './AuthProvider';
+import { buildPublicCardUrl } from '../lib/links';
+import { buildWhatsAppUrl } from '../lib/cardInsights';
+import { buildKioskWhatsAppMessage, kioskNoticeKindForStamp, type KioskNoticeKind } from '../lib/whatsappMessages';
 
 interface KioskModeProps {
   customer: Customer;
@@ -64,6 +68,8 @@ const formatKioskAction = (type: Transaction['type']) => {
             return 'Stamp removed';
         case 'gift':
             return 'Gift stamps';
+        case 'bonus':
+            return 'Bonus stamp (game)';
         default:
             return 'Stamp added';
     }
@@ -97,6 +103,10 @@ export const KioskMode: React.FC<KioskModeProps> = ({
   // Confirmation States
   const [confirmAction, setConfirmAction] = useState<'stamp' | 'remove' | 'redeem' | null>(null);
   const [redemptionRemarks, setRedemptionRemarks] = useState("");
+  // Last successful stamp/redeem, offered as a WhatsApp ping to the client.
+  const [notice, setNotice] = useState<{ kind: KioskNoticeKind; stamps: number } | null>(null);
+  const { currentOwner } = useAuth();
+  useEffect(() => setNotice(null), [card.id]);
 
   const canAdd = card.status === 'Active' && card.stamps < template.totalStamps;
   const canRedeem = allowRedeem && card.status === 'Active' && card.stamps >= template.totalStamps;
@@ -141,10 +151,31 @@ export const KioskMode: React.FC<KioskModeProps> = ({
       }
   })();
 
+  const noticeWhatsAppUrl = (() => {
+      if (!notice) return null;
+      const slug = currentOwner?.slug;
+      const text = buildKioskWhatsAppMessage({
+          kind: notice.kind,
+          businessName: currentOwner?.businessName,
+          stamps: notice.stamps,
+          totalStamps: template.totalStamps,
+          rewardName: template.rewardName,
+          // After a redeem the card is closed, so don't send them to it.
+          cardUrl: slug && notice.kind !== 'redeem' ? buildPublicCardUrl(slug, card.uniqueId) : null,
+      });
+      return buildWhatsAppUrl(customer.mobile, text);
+  })();
+  const noticeCopy = notice && {
+      stamp: { title: 'Stamp added', detail: `${notice.stamps}/${template.totalStamps} stamps. Let ${customer.name.split(' ')[0]} know it landed.` },
+      complete: { title: 'Card complete', detail: `${template.rewardName} is unlocked. Tell ${customer.name.split(' ')[0]} it's ready.` },
+      redeem: { title: 'Reward redeemed', detail: `Send ${customer.name.split(' ')[0]} a thank-you.` },
+  }[notice.kind];
+
   // --- Handlers ---
 
   const handleConfirmAction = async () => {
       setActionError("");
+      setNotice(null);
       try {
           if (confirmAction === 'stamp') {
               await performAddStamp();
@@ -170,6 +201,7 @@ export const KioskMode: React.FC<KioskModeProps> = ({
               lastVisit: new Date().toISOString().split('T')[0],
               history: [tx, ...card.history]
           });
+          setNotice({ kind: kioskNoticeKindForStamp(card.stamps + 1, template.totalStamps), stamps: card.stamps + 1 });
       } finally {
           setTimeout(() => setIsAnimating(false), 300);
       }
@@ -193,6 +225,7 @@ export const KioskMode: React.FC<KioskModeProps> = ({
           completedDate: new Date().toISOString().split('T')[0],
           history: [tx, ...card.history]
       });
+      setNotice({ kind: 'redeem', stamps: card.stamps });
   };
 
   const handleIssueNext = () => {
@@ -338,6 +371,39 @@ export const KioskMode: React.FC<KioskModeProps> = ({
             {actionError && (
                 <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                     {actionError}
+                </div>
+            )}
+
+            {noticeWhatsAppUrl && noticeCopy && (
+                <div className="flex flex-col gap-4 rounded-[24px] border border-[#cfe6bf] bg-[#f3f9ee] p-4 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.3)] animate-fade-in sm:flex-row sm:items-center sm:p-5">
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#e2f0d6] text-[#4c7a2b]">
+                            <CheckCircle size={20} />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-base font-semibold text-[#1d1d1f]">{noticeCopy.title}</p>
+                            <p className="mt-0.5 text-sm text-[#5f6368]">{noticeCopy.detail}</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <a
+                            href={noticeWhatsAppUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 text-sm font-semibold text-[#0b3d1e] shadow-[0_14px_30px_-18px_rgba(37,211,102,0.9)] transition-colors hover:bg-[#1fbe5b] sm:flex-none"
+                        >
+                            <MessageCircle size={18} />
+                            Avisar por WhatsApp
+                        </a>
+                        <button
+                            type="button"
+                            onClick={() => setNotice(null)}
+                            aria-label="Dismiss"
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#6e6e73] transition-colors hover:bg-black/5"
+                        >
+                            <X size={18} />
+                        </button>
+                    </div>
                 </div>
             )}
             

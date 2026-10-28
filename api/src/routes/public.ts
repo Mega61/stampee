@@ -13,7 +13,9 @@ import {
   type TransactionRow,
 } from '../lib/dto.js';
 import { normalizeSlug } from '../lib/slug.js';
+import { computeGameState, type GameCampaign } from '../lib/game.js';
 import { signedReadUrl } from '../storage/gcs.js';
+import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 
 const PublicSignupBody = z.object({
   name: z.string().trim().min(1, 'Name is required.').max(120),
@@ -33,6 +35,8 @@ const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } 
 const PUBLIC_POST_SIGNUP = { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } };
 
 export const publicRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('preHandler', rejectMalformedUniqueId);
+
   // GET /public/cards/:slug/:uniqueId — anonymous loyalty-card view.
   app.get<{ Params: { slug: string; uniqueId: string } }>(
     '/public/cards/:slug/:uniqueId',
@@ -63,14 +67,22 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
       if (!customer) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
 
       let campaign: Awaited<ReturnType<typeof toCampaignDtoSigned>> | null = null;
+      let gameCampaign: GameCampaign | null = null;
       if (card.campaign_id) {
         const campaignRow = (await db
           .selectFrom('campaigns')
           .selectAll()
           .where('id', '=', card.campaign_id)
-          .executeTakeFirst()) as CampaignRow | undefined;
-        if (campaignRow) campaign = await toCampaignDtoSigned(campaignRow, signedReadUrl);
+          .executeTakeFirst()) as (CampaignRow & GameCampaign) | undefined;
+        if (campaignRow) {
+          campaign = await toCampaignDtoSigned(campaignRow, signedReadUrl);
+          gameCampaign = campaignRow;
+        }
       }
+
+      // Weekly game folded in to save a round trip; null when there's no game.
+      const gameState = await computeGameState(db, card, gameCampaign);
+      const game = gameState.state === 'disabled' ? null : gameState;
 
       const history = (await db
         .selectFrom('transactions')
@@ -98,6 +110,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           },
           customer: { id: customer.id, name: customer.name },
           campaign,
+          game,
         },
       };
     },

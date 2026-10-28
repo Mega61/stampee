@@ -30,3 +30,5 @@ infra/.env.postgres
 *.njsproj
 *.sln
 *.sw?
+scratch/
+.claude/worktrees/

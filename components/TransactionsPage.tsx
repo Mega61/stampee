@@ -134,6 +134,7 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ customers })
           case 'stamp_remove': return <Minus size={16} />;
           case 'issued': return <CreditCard size={16} />;
           case 'gift': return <Gift size={16} />;
+          case 'bonus': return <Gift size={16} />;
           default: return <Plus size={16} />;
       }
   };
@@ -144,6 +145,7 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ customers })
           case 'stamp_remove': return "bg-red-100 text-red-700 border-red-200";
           case 'issued': return "bg-blue-100 text-blue-700 border-blue-200";
           case 'gift': return "bg-amber-100 text-amber-800 border-amber-200";
+          case 'bonus': return "bg-yellow-100 text-yellow-800 border-yellow-200";
           default: return "bg-green-100 text-green-700 border-green-200";
       }
   };
@@ -154,6 +156,7 @@ export const TransactionsPage: React.FC<TransactionsPageProps> = ({ customers })
           case 'stamp_remove': return "Removed";
           case 'issued': return "Issued";
           case 'gift': return "Gift";
+          case 'bonus': return "Bonus";
           default: return "Stamp";
       }
   };

@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react';
-import { Template } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { FxStyle, Template } from '../types';
 import { LoyaltyCard } from './LoyaltyCard';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,16 +8,24 @@ import { Switch } from './ui/switch';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
-import { ArrowLeft, Check as CheckIcon, Smartphone, Image as ImageIcon, Type, Palette, Grid, X, ChevronDown, Gift } from 'lucide-react';
+import { ArrowLeft, Check as CheckIcon, Smartphone, Image as ImageIcon, Type, Palette, Grid, X, ChevronDown, Gift, Ticket } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ICON_OPTIONS } from '../lib/iconRegistry';
 import { useAuth } from './AuthProvider';
 import { deleteCampaignAssetByUrl, type CampaignAssetKind, uploadCampaignAsset } from '../lib/storage/campaignAssets';
+import { fetchGameEstimate, type GameEstimate } from '../lib/db/game';
 
 interface CardEditorProps {
   initialTemplate: Template;
   onSave: (template: Template) => Promise<void>;
 }
+
+// Customer-card animation energy (docs/CARD_ENGAGEMENT_PLAN.md §5.0).
+const FX_STYLE_OPTIONS: { value: FxStyle; label: string; hint: string }[] = [
+  { value: 'elegant', label: 'Elegant', hint: 'Soft shine and subtle particles' },
+  { value: 'playful', label: 'Playful', hint: 'Bouncy, confetti, more energy' },
+  { value: 'minimal', label: 'Minimal', hint: 'Quiet — best for busy photos' },
+];
 
 type PalettePreset = {
   id: string;
@@ -351,6 +359,123 @@ const normalizeHex = (value?: string) => (value ?? '').trim().toLowerCase();
 
 const LOGO_FILE_ACCEPT = '.jpg,.jpeg,.png,.webp,.svg,image/jpeg,image/png,image/webp,image/svg+xml';
 const BACKGROUND_FILE_ACCEPT = '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp';
+
+// Weekly scratch game settings (docs/CARD_ENGAGEMENT_PLAN.md §8.4, §8.8).
+// Defaults: off, 15 % odds, 30 bonus stamps a month.
+const GAME_DEFAULTS = { winPct: 15, cap: 30 };
+
+const GameSettingsSection: React.FC<{
+  template: Template;
+  onChange: (patch: Pick<Template, 'gameEnabled' | 'gameWinPct' | 'gameMonthlyCap'>) => void;
+}> = ({ template, onChange }) => {
+  const enabled = template.gameEnabled === true;
+  const winPct = template.gameWinPct ?? GAME_DEFAULTS.winPct;
+  const cap = template.gameMonthlyCap ?? GAME_DEFAULTS.cap;
+  const [estimate, setEstimate] = useState<GameEstimate | null>(null);
+  const [estimateState, setEstimateState] = useState<'idle' | 'loading' | 'unsaved' | 'error'>('idle');
+
+  // Live estimate for the unsaved odds / cap (debounced).
+  useEffect(() => {
+    if (!enabled || !template.id) return;
+    const ctrl = new AbortController();
+    setEstimateState('loading');
+    const timer = window.setTimeout(() => {
+      fetchGameEstimate(template.id, { winPct, cap }, ctrl.signal)
+        .then((data) => {
+          setEstimate(data);
+          setEstimateState('idle');
+        })
+        .catch((err: unknown) => {
+          if (ctrl.signal.aborted) return;
+          // A campaign that was never saved has no cards yet.
+          setEstimateState((err as { status?: number })?.status === 404 ? 'unsaved' : 'error');
+        });
+    }, 300);
+    return () => {
+      ctrl.abort();
+      window.clearTimeout(timer);
+    };
+  }, [enabled, template.id, winPct, cap]);
+
+  const totalStamps = Math.max(1, template.totalStamps);
+  // Same formula as the API (A × 0.4 × 4.3 × w), for the "with N clients" example.
+  const perHundred = Math.round(100 * 0.4 * 4.3 * (winPct / 100));
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Label htmlFor="gameEnabled" className="text-sm font-medium">Weekly scratch ticket</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Once a week, clients who visited in the last 60 days can scratch a ticket on their card and may win a bonus stamp.
+            A win never completes a card.
+          </p>
+        </div>
+        <Switch id="gameEnabled" checked={enabled} onCheckedChange={(checked) => onChange({ gameEnabled: checked, gameWinPct: winPct, gameMonthlyCap: cap })} />
+      </div>
+
+      {enabled && (
+        <>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="gameWinPct" className="text-xs uppercase tracking-wider text-muted-foreground">Chance to win</Label>
+              <span className="text-sm font-semibold tabular-nums">{winPct}%</span>
+            </div>
+            <input
+              id="gameWinPct"
+              type="range"
+              min={5}
+              max={50}
+              step={1}
+              value={Math.min(50, Math.max(5, winPct))}
+              onChange={(e) => onChange({ gameEnabled: true, gameWinPct: Number(e.target.value), gameMonthlyCap: cap })}
+              className="w-full accent-primary"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground"><span>5%</span><span>50%</span></div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="gameMonthlyCap" className="text-xs uppercase tracking-wider text-muted-foreground">Monthly budget (bonus stamps)</Label>
+            <Input
+              id="gameMonthlyCap"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={100000}
+              value={cap}
+              onChange={(e) => {
+                const value = Math.max(0, Math.min(100000, Math.round(Number(e.target.value) || 0)));
+                onChange({ gameEnabled: true, gameWinPct: winPct, gameMonthlyCap: value });
+              }}
+            />
+            <p className="text-xs text-muted-foreground">When the month&apos;s budget is used up, tickets keep working but can&apos;t win.</p>
+          </div>
+
+          <div className="rounded-xl border bg-secondary/40 p-3 text-sm" aria-live="polite">
+            {estimateState === 'loading' && !estimate ? (
+              <span className="text-muted-foreground">Estimating…</span>
+            ) : estimate && estimateState !== 'unsaved' && estimateState !== 'error' ? (
+              <>
+                <p>
+                  With your <strong>~{estimate.eligibleCards}</strong> active clients: ≈{' '}
+                  <strong>{estimate.expectedStampsPerMonth}</strong> bonus stamps a month
+                  {estimate.expectedStampsPerMonth > cap ? <>, capped at <strong>{cap}</strong></> : null}
+                  {' '}≈ <strong>{estimate.expectedRewardsPerMonth}</strong> rewards.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Assumes 40% of eligible clients play each week.</p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                Roughly {perHundred} bonus stamps a month per 100 active clients (≈ {Math.round((Math.min(perHundred, cap) / totalStamps) * 10) / 10} rewards), never more than {cap}.
+                {estimateState === 'unsaved' ? ' Save the card to see the estimate for your clients.' : ''}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
 
 export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave }) => {
   const navigate = useNavigate();
@@ -1092,6 +1217,37 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
                             </div>
                         </div>
 
+                        <div className="space-y-2 pt-2 border-t">
+                            <Label id="fxStyleLabel" className="text-xs uppercase tracking-wider text-muted-foreground">Card animations</Label>
+                            <div role="radiogroup" aria-labelledby="fxStyleLabel" className="grid gap-2">
+                                {FX_STYLE_OPTIONS.map((option) => {
+                                    const selected = (template.fxStyle ?? 'elegant') === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            role="radio"
+                                            aria-checked={selected}
+                                            onClick={() => handleChange('fxStyle', option.value)}
+                                            className={
+                                                'flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-all ' +
+                                                (selected
+                                                  ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                                                  : 'bg-white hover:bg-secondary hover:border-secondary-foreground/20')
+                                            }
+                                        >
+                                            <span className="min-w-0">
+                                                <span className="block text-sm font-medium">{option.label}</span>
+                                                <span className="block text-xs text-muted-foreground">{option.hint}</span>
+                                            </span>
+                                            {selected && <CheckIcon size={16} className="shrink-0 text-primary" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Applies to the customer&apos;s card, including cards already issued.</p>
+                        </div>
+
                     </AccordionContent>
                 </AccordionItem>
 
@@ -1121,6 +1277,18 @@ export const CardEditor: React.FC<CardEditorProps> = ({ initialTemplate, onSave 
                                 )
                             })}
                         </div>
+                    </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="game">
+                    <AccordionTrigger>
+                        <span className="flex items-center gap-2"><Ticket size={16}/> Weekly scratch game</span>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <GameSettingsSection
+                            template={template}
+                            onChange={(patch) => setTemplate((prev) => ({ ...prev, ...patch }))}
+                        />
                     </AccordionContent>
                 </AccordionItem>
 

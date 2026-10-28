@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { db } from '../db/kysely.js';
+import { sql } from 'kysely';
 import { AppError } from '../lib/errors.js';
 import { requireRole } from '../middleware/requireRole.js';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../lib/dto.js';
 import { IssueCardBody, UpdateCardBody, TransactionBody, GiftStampsBody } from '../schemas/cards.js';
 import { randomUUID } from 'node:crypto';
+import { onCardChanged } from '../lib/cardEvents.js';
 
 export const cardRoutes: FastifyPluginAsync = async (app) => {
   // GET /cards/count
@@ -102,7 +104,11 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
     if (!existing) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
 
     const updates: Record<string, unknown> = {};
-    if (body.stamps !== undefined) updates['stamps'] = body.stamps;
+    if (body.stampsDelta !== undefined) {
+      updates['stamps'] = sql`greatest(0, stamps + ${body.stampsDelta})`;
+    } else if (body.stamps !== undefined) {
+      updates['stamps'] = body.stamps;
+    }
     if (body.status !== undefined) updates['status'] = body.status;
     if (body.completedDate !== undefined) updates['completed_date'] = body.completedDate;
     if (body.lastVisit !== undefined) updates['last_visit'] = body.lastVisit;
@@ -113,6 +119,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
         .set(updates)
         .where('id', '=', req.params.id)
         .execute();
+      onCardChanged(req.params.id);
     }
 
     const row = await db
@@ -184,6 +191,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
         actor_role: claims.role,
       })
       .execute();
+    onCardChanged(req.params.id);
     const row = await db
       .selectFrom('transactions')
       .selectAll()
@@ -281,6 +289,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
       }
       return out;
     });
+    for (const r of results) if (r.added > 0) onCardChanged(r.cardId);
 
     return {
       ok: true,

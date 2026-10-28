@@ -7,6 +7,7 @@ import type { Customer, Template } from '../types';
 import { buildCardInsights, buildWhatsAppUrl, type CardInsight } from '../lib/cardInsights';
 import { giftStamps } from '../lib/db/issuedCards';
 import { buildPublicCardUrl } from '../lib/links';
+import { withCardSource } from '../lib/whatsappMessages';
 
 interface WinBackDialogProps {
   isOpen: boolean;
@@ -71,7 +72,8 @@ export const renderWinBackMessage = (
     '{faltan}': plural(row.totalStamps - stampsAfter, 'sello', 'sellos'),
     '{recompensa}': row.template.rewardName || 'recompensa',
     '{tarjeta}': row.card.campaignName,
-    '{link}': slug ? buildPublicCardUrl(slug, row.card.uniqueId) : '',
+    // `src` lets the engagement beacon attribute the open to this message.
+    '{link}': slug ? withCardSource(buildPublicCardUrl(slug, row.card.uniqueId), 'whatsapp') : '',
   };
   return template.replace(/\{[a-z]+\}/g, (token) => values[token] ?? token).trim();
 };

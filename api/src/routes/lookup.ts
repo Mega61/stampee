@@ -51,6 +51,7 @@ export const summarizeCard = (
   // The snapshot is what the customer actually sees on their card.
   const totalStamps = num(snapshot['totalStamps']) ?? campaign?.total_stamps ?? card.stamps;
   let winBackGift = 0;
+  let gameBonus = 0;
   let issuedAmount: number | undefined;
   let issuedAt: number | null = null;
   let lastVisitAt: number | null = null;
@@ -66,6 +67,8 @@ export const summarizeCard = (
     if (tx.type === 'stamp_add' && (lastVisitAt === null || ts > lastVisitAt)) lastVisitAt = ts;
     if (tx.type === 'redeem' && (redeemedAt === null || ts > redeemedAt)) redeemedAt = ts;
     if (tx.type === 'gift') winBackGift += tx.amount;
+    // Weekly scratch game stamps are never visits either.
+    if (tx.type === 'bonus') gameBonus += tx.amount;
   }
 
   // Welcome gift: snapshot first, then the amount recorded on the 'issued'
@@ -87,8 +90,8 @@ export const summarizeCard = (
     totalStamps,
     stampsRemaining: remaining,
     readyToRedeem: card.status === 'Active' && remaining === 0,
-    giftedStamps: { welcome: welcomeGift, winBack: winBackGift },
-    stampsFromVisits: Math.max(card.stamps - welcomeGift - winBackGift, 0),
+    giftedStamps: { welcome: welcomeGift, winBack: winBackGift, game: gameBonus },
+    stampsFromVisits: Math.max(card.stamps - welcomeGift - winBackGift - gameBonus, 0),
     issuedAt: iso(issuedAt) ?? (card.created_at ? new Date(card.created_at).toISOString() : null),
     lastVisitAt: iso(lastVisitAt),
     lastActivityAt: iso(lastActivityAt) ?? dateOnly(card.last_visit),

@@ -11,6 +11,10 @@ export const IssueCardBody = z.object({
 
 export const UpdateCardBody = z.object({
   stamps: z.number().int().min(0).max(1000).optional(),
+  // Relative change applied atomically (stamps = stamps + delta, floor 0).
+  // Preferred over `stamps` so a concurrent write (e.g. a scratch-game win at
+  // the counter) isn't overwritten by a stale absolute count.
+  stampsDelta: z.number().int().min(-100).max(100).optional(),
   status: z.enum(['Active', 'Redeemed']).optional(),
   completedDate: z.string().max(50).optional().nullable(),
   lastVisit: z.string().max(50).optional(),
