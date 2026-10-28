@@ -3,10 +3,12 @@ import 'dotenv/config';
 
 const timeWindow = z.string().regex(/^\d+(ms|s|m|h|d)$/, 'expected a duration like 15m or 30d');
 // PEM blobs in env files: accept one line with `\n` escapes.
+// PEM from env: `\n` escapes become newlines, and quotes pasted around the
+// value (Portainer passes them through literally) are dropped.
 const pem = z
   .string()
   .default('')
-  .transform((v) => v.replace(/\\n/g, '\n').trim());
+  .transform((v) => v.trim().replace(/^(['"])([\s\S]*)\1$/, '$2').replace(/\\n/g, '\n').trim());
 
 const Env = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -49,10 +51,7 @@ const Env = z.object({
   // escapes (as found in the JSON / one-line env files) are accepted.
   GOOGLE_WALLET_ISSUER_ID: z.string().trim().default(''),
   GOOGLE_WALLET_SA_EMAIL: z.string().trim().default(''),
-  GOOGLE_WALLET_SA_KEY: z
-    .string()
-    .default('')
-    .transform((v) => v.replace(/\\n/g, '\n').trim()),
+  GOOGLE_WALLET_SA_KEY: pem,
   GOOGLE_WALLET_CLASS_PREFIX: z
     .string()
     .trim()
