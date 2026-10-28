@@ -27,6 +27,9 @@ const prefersReducedMotion = () => {
 
 export const haptic = (pattern: HapticName | VibratePattern) => {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+  // Before the first tap Chrome blocks the call and logs a console error.
+  const activation = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+  if (activation && !activation.hasBeenActive) return;
   if (prefersReducedMotion()) return;
   try {
     navigator.vibrate(typeof pattern === 'string' ? HAPTICS[pattern] : pattern);
