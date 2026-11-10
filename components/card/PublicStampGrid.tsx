@@ -5,6 +5,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { withAlpha } from '../../lib/card/gridFx';
+import { stampGridStyles } from '../../lib/card/stampLayout';
 import { buildStampTimeline } from '../../lib/card/stampTimeline';
 import { usePageVisible } from '../../lib/card/usePageVisible';
 import type { SlotFxState } from '../../lib/card/types';
@@ -148,13 +149,14 @@ export const PublicStampGrid: React.FC<{ ctx: StampGridContext }> = ({ ctx }) =>
   const remaining = ctx.totalStamps - ctx.stamps;
   const almostThere = !ctx.isCompleted && remaining > 0 && remaining <= 2;
   const nextIndex = ctx.isCompleted ? -1 : ctx.stamps;
+  const grid = stampGridStyles(ctx.totalStamps);
 
   return (
     <>
-      <div className={cn('grid grid-cols-4 justify-items-center', ctx.isHighDensity ? 'gap-2' : 'gap-4')}>
+      <div className={cn('grid justify-items-center', ctx.isHighDensity ? 'gap-2' : 'gap-4')} style={grid.container}>
         {Array.from({ length: ctx.totalStamps }).map((_, index) => (
+          <div key={index} className="flex justify-center" style={grid.slot(index)}>
           <PublicStampSlot
-            key={index}
             index={index}
             ctx={ctx}
             earned={index < ctx.stamps}
@@ -169,6 +171,7 @@ export const PublicStampGrid: React.FC<{ ctx: StampGridContext }> = ({ ctx }) =>
             pageVisible={pageVisible}
             showTooltip={showTooltip}
           />
+          </div>
         ))}
       </div>
 

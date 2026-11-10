@@ -46,6 +46,20 @@ export const profileRoutes: FastifyPluginAsync = async (app) => {
   // GET /profile (any signed-in user)
   app.get('/profile', async (req) => {
     const claims = await requireUser(req);
+    // An API key is not a person: its `sub` is the key id, so it used to 404
+    // here. Integrations (the studio panel) need the slug to build public card
+    // links, so a key gets the workspace's public identity only — business
+    // name and slug, never the owner's email or account fields. The account
+    // itself stays human-only (/auth/me, PATCH /profile).
+    if (claims.role === 'api') {
+      const owner = await db
+        .selectFrom('profiles')
+        .select(['business_name', 'slug'])
+        .where('id', '=', claims.ownerScopeId)
+        .executeTakeFirst();
+      if (!owner) throw new AppError(404, 'NOT_FOUND', 'Profile not found.');
+      return { ok: true, data: { businessName: owner.business_name, slug: owner.slug } };
+    }
     const row = await db
       .selectFrom('profiles')
       .selectAll()

@@ -6,7 +6,7 @@ import { QrCodeDisplay } from './ui/qr-code-display';
 import { generateReward } from '../services/rewardService';
 import { Template, Transaction } from '../types';
 import { cn, resolveHexAndOpacity, hexToRgba, getBonusStamps } from '../lib/utils';
-import { getLateGiftStamps, getStampSizing, isGiftedSlot, type StampSizing } from '../lib/card/stampLayout';
+import { getLateGiftStamps, getStampSizing, isGiftedSlot, stampGridStyles, type StampSizing } from '../lib/card/stampLayout';
 import { QrCode, History, Gift, Plus, X, Minus, CreditCard, Globe, Sparkles } from 'lucide-react';
 import { siFacebook, siInstagram, siTiktok, siWhatsapp, siX, siYoutube } from 'simple-icons/icons';
 import { buildBookingWhatsAppUrl } from '../lib/whatsapp';
@@ -397,7 +397,14 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
       >
           
           {/* --- SLIDE 1: FRONT (Stamps) --- */}
-          <div className="w-full h-[50%] relative flex flex-col items-center justify-center p-6">
+          {/* `safe center`: centered when it fits; when the content is taller than
+              the card (small phones, long titles, 3 rows of stamps, the owner's
+              campaign tiles) it starts at the top and scrolls instead of being
+              clipped at both ends. */}
+          <div
+            className="w-full h-[50%] relative flex flex-col items-center p-6 overflow-y-auto overflow-x-hidden no-scrollbar"
+            style={{ justifyContent: 'safe center' }}
+          >
             
             {/* NEW: Top Header (QR Button Only) */}
             <div className={cn(
@@ -497,10 +504,10 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
               <div className={cn(
                   "relative max-w-sm transition-all",
                   isCompleted ? "mb-6" : "mb-12",
-                  !renderStampGrid && "grid grid-cols-4 justify-items-center",
+                  !renderStampGrid && "grid justify-items-center",
                   !renderStampGrid && (isHighDensity ? "gap-2" : "gap-4"),
                   !renderStampGrid && readOnly && !onStampAddTap && !onStampRemoveTap && "pointer-events-none" // Disable interaction in read-only unless tap callbacks are provided
-              )}>
+              )} style={renderStampGrid ? undefined : stampGridStyles(totalStamps).container}>
                 {renderStampGrid ? renderStampGrid({
                   stamps,
                   totalStamps,
@@ -522,8 +529,8 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                   isRedeemed,
                   history,
                 }) : Array.from({ length: totalStamps }).map((_, index) => (
-                  <StampSlot 
-                    key={index}
+                  <div key={index} className="flex justify-center" style={stampGridStyles(totalStamps).slot(index)}>
+                  <StampSlot
                     index={index}
                     active={index < stamps}
                     gifted={isGiftedSlot(index, stamps, bonusStamps, lateGiftStamps)}
@@ -538,6 +545,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
                     inactiveIcon={iconInactiveColor.hex}
                     inactiveBorder={hexToRgba(iconInactiveColor.hex, 0.5)}
                   />
+                  </div>
                 ))}
 
                 {isCompleted && !isRedeemed && !showReward && (
