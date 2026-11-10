@@ -255,6 +255,21 @@ describe('api-keys: tenant isolation + management lockout', () => {
     expect(write.statusCode).toBe(404);
   });
 
+  it('GET /profile with a key returns only the public identity (slug for card links)', async () => {
+    const { key } = await mintKey();
+    const res = await rig.app.inject({ method: 'GET', url: '/profile', headers: withKey(key) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual({ businessName: 'Test Cafe', slug: 'test-cafe' });
+
+    const cannotPatch = await rig.app.inject({
+      method: 'PATCH',
+      url: '/profile',
+      payload: { slug: 'hijacked' },
+      headers: { ...json, ...withKey(key) },
+    });
+    expect(cannotPatch.statusCode).not.toBe(200);
+  });
+
   it('an API key cannot manage keys, staff, admins, or the account', async () => {
     const { key } = await mintKey();
     const headers = { ...json, ...withKey(key) };

@@ -82,6 +82,9 @@ const DevCard: React.FC<{ params: URLSearchParams }> = ({ params }) => {
   const base = templates.find((t) => t.id === params.get('t')) ?? templates[0]!;
   const template = useMemo(() => ({
     ...base,
+    // `tpl`: a full or partial campaign as JSON (e.g. one copied from GET
+    // /campaigns), to preview a real design.
+    ...(params.get('tpl') ? (JSON.parse(params.get('tpl')!) as Partial<typeof base>) : {}),
     fxStyle: (params.get('style') as FxStyle) ?? 'elegant',
     backgroundImage: params.get('bg') ?? base.backgroundImage,
     backgroundOpacity: params.has('opacity') ? Number(params.get('opacity')) : base.backgroundOpacity,
