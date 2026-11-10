@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Template } from '../types';
 import { Button } from './ui/button';
 import { Gift, PlusCircle, Edit2, Trash2, CreditCard, Play, QrCode, Power, Copy, ExternalLink } from 'lucide-react';
@@ -24,6 +24,13 @@ interface MyCardsProps {
   onToggleCampaignEnabled: (cardId: string, isEnabled: boolean) => Promise<void>;
 }
 
+// Matching dimensions from Customize Live Preview (max-w-[380px] h-[750px])
+const BASE_WIDTH = 380;
+const BASE_HEIGHT = 750;
+const BASE_TILE_WIDTH = 320;
+/** Never shrink a card below ~55 % of its normal size to make it fit. */
+const MAX_CANVAS = 1.8;
+
 interface ResponsiveCardItemProps {
   card: Template;
   onEdit: (id: string) => void;
@@ -34,7 +41,7 @@ interface ResponsiveCardItemProps {
 }
 
 // Internal component for responsive card scaling
-const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({ 
+export const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({ 
     card, 
     onEdit, 
     onDelete,
@@ -43,27 +50,45 @@ const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({
     toggleBusy,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [scale, setScale] = useState(1);
+    const canvasRef = useRef<HTMLDivElement>(null);
+    const [tileWidth, setTileWidth] = useState(BASE_TILE_WIDTH);
+    // How much bigger than 380×750 the card is rendered before scaling it into
+    // the tile. A tile can't scroll, so when the card's content is taller than
+    // 750 (two-line title, three rows of stamps, socials) it's laid out on a
+    // proportionally larger canvas and scaled down: the whole card shows, the
+    // way it looks on a phone, just smaller.
+    const [canvas, setCanvas] = useState(1);
     const navigate = useNavigate();
-
-    // Matching dimensions from Customize Live Preview (max-w-[380px] h-[750px])
-    const BASE_WIDTH = 380;
-    const BASE_HEIGHT = 750;
 
     useEffect(() => {
         const observer = new ResizeObserver((entries) => {
-            if (entries[0]) {
-                 const width = entries[0].contentRect.width;
-                 setScale(width / BASE_WIDTH);
-            }
+            if (entries[0]) setTileWidth(entries[0].contentRect.width);
         });
-        
-        if (containerRef.current) {
-            observer.observe(containerRef.current);
-        }
-        
+        if (containerRef.current) observer.observe(containerRef.current);
         return () => observer.disconnect();
     }, []);
+
+    // Grow the canvas until the card front stops overflowing. Re-checked when
+    // its content resizes (fonts, logo and background loading).
+    useLayoutEffect(() => {
+        setCanvas(1);
+    }, [card]);
+    useLayoutEffect(() => {
+        const front = canvasRef.current?.querySelector<HTMLElement>('[data-card-front]');
+        if (!front) return;
+        const fit = () => {
+            const overflow = front.scrollHeight / Math.max(front.clientHeight, 1);
+            if (overflow > 1.005) setCanvas((c) => Math.min(MAX_CANVAS, c * overflow * 1.01));
+        };
+        fit();
+        const observer = new ResizeObserver(fit);
+        Array.from(front.children as HTMLCollectionOf<Element>).forEach((child) => observer.observe(child));
+        return () => observer.disconnect();
+    }, [card, canvas]);
+
+    const width = BASE_WIDTH * canvas;
+    const height = BASE_HEIGHT * canvas;
+    const scale = tileWidth / width;
 
     const openActiveView = () => navigate(`/active/${card.id}`);
 
@@ -76,10 +101,11 @@ const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({
                 onClick={openActiveView}
             >
                 <div 
+                    ref={canvasRef}
                     className="origin-top-left absolute top-0 left-0 will-change-transform"
                     style={{ 
-                        width: `${BASE_WIDTH}px`, 
-                        height: `${BASE_HEIGHT}px`, 
+                        width: `${width}px`, 
+                        height: `${height}px`, 
                         transform: `scale(${scale})` 
                     }}
                 >
@@ -118,7 +144,8 @@ const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({
                     </p>
                 </div>
                 
-                <div className="flex items-center justify-center gap-3">
+                {/* Wraps instead of spilling into the next tile when the tile is narrow. */}
+                <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
                     <Button 
                         size="sm" 
                         className="rounded-full px-6 gap-2 shadow-sm font-semibold" 
@@ -126,7 +153,7 @@ const ResponsiveCardItem: React.FC<ResponsiveCardItemProps> = ({
                     >
                         <Play size={16} fill="currentColor" /> Open
                     </Button>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-center gap-1.5">
                         <Button
                             variant="outline"
                             size="sm"
