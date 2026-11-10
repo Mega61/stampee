@@ -14,7 +14,7 @@ import {
 } from '../lib/dto.js';
 import { normalizeSlug } from '../lib/slug.js';
 import { computeGameState, type GameCampaign } from '../lib/game.js';
-import { signedReadUrl } from '../storage/gcs.js';
+import { publicImageUrl } from './publicImages.js';
 import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 
 const PublicSignupBody = z.object({
@@ -75,7 +75,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           .where('id', '=', card.campaign_id)
           .executeTakeFirst()) as (CampaignRow & GameCampaign) | undefined;
         if (campaignRow) {
-          campaign = await toCampaignDtoSigned(campaignRow, signedReadUrl);
+          campaign = await toCampaignDtoSigned(campaignRow, publicImageUrl);
           gameCampaign = campaignRow;
         }
       }
@@ -91,7 +91,7 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
         .orderBy('timestamp', 'asc')
         .execute()) as TransactionRow[];
 
-      const templateSnapshot = await signTemplateSnapshot(card.template_snapshot, signedReadUrl);
+      const templateSnapshot = await signTemplateSnapshot(card.template_snapshot, publicImageUrl);
 
       return {
         ok: true,

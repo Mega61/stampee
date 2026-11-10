@@ -30,7 +30,8 @@ const ICON_FILE_RE = /^icon-(\d+)\.png$/;
 /** Google Wallet's recommended hero image size. */
 export const HERO_WIDTH = 1032;
 export const HERO_HEIGHT = 336;
-const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+// Backgrounds may be uploaded up to 6MB (lib/storage/campaignAssets.ts).
+const MAX_LOGO_BYTES = 8 * 1024 * 1024;
 const LOGO_FETCH_TIMEOUT_MS = 4000;
 const DEFAULT_BG = '#ffffff';
 

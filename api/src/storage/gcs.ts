@@ -139,6 +139,17 @@ export const isValidPath = (path: string): boolean => {
 // full signed-GET URL's pathname.
 const ASSET_PATH_RE = /[0-9a-f-]{36}\/(?:logo|background)\/[0-9a-f-]{36}\.(?:jpg|png|webp|svg)/i;
 
+/** The storage path a stored reference points at, or null for external URLs. */
+export const ownAssetPath = (ref: string | null | undefined): string | null => {
+  if (!ref) return null;
+  if (!/^https?:\/\//i.test(ref)) return isValidPath(ref) ? ref : null;
+  try {
+    return decodeURIComponent(new URL(ref).pathname).match(ASSET_PATH_RE)?.[0] ?? null;
+  } catch {
+    return null;
+  }
+};
+
 // Normalize a logo/background reference coming in on a write request into the
 // canonical value to store. The DB must hold either a storage *path* or an
 // external URL — never one of our own short-lived signed-GET URLs (those

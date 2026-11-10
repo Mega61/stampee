@@ -24,6 +24,7 @@ import { apiKeyRoutes } from './routes/apiKeys.js';
 import { publicViewsRoutes } from './routes/publicViews.js';
 import { analyticsEngagementRoutes } from './routes/analyticsEngagement.js';
 import { publicPwaRoutes } from './routes/publicPwa.js';
+import { publicImageRoutes } from './routes/publicImages.js';
 import { publicGameRoutes } from './routes/publicGame.js';
 import { walletRoutes } from './routes/wallet.js';
 import { appleWalletRoutes } from './routes/appleWallet.js';
@@ -114,6 +115,7 @@ export const buildApp = async () => {
   await app.register(publicViewsRoutes);
   await app.register(analyticsEngagementRoutes);
   await app.register(publicPwaRoutes);
+  await app.register(publicImageRoutes);
   await app.register(publicGameRoutes);
   await app.register(walletRoutes);
   await app.register(appleWalletRoutes);
