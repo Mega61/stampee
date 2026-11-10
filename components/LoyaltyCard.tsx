@@ -402,6 +402,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
               campaign tiles) it starts at the top and scrolls instead of being
               clipped at both ends. */}
           <div
+            data-card-front
             className="w-full h-[50%] relative flex flex-col items-center p-6 overflow-y-auto overflow-x-hidden no-scrollbar"
             style={{ justifyContent: 'safe center' }}
           >

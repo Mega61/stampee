@@ -12,6 +12,7 @@
 import React, { Suspense, lazy, useCallback, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { templates } from '../../data/templates';
+import { ResponsiveCardItem } from '../MyCards';
 import type { FxStyle, GameState, GameStateKind, IssuedCard, SocialLinks, Transaction } from '../../types';
 import type { NewStampEvent } from '../../lib/card/types';
 
@@ -74,6 +75,7 @@ const Index: React.FC = () => (
 export const DevCardsPage: React.FC = () => {
   const [params] = useSearchParams();
   const templateId = params.get('t');
+  if (params.get('tiles') === '1') return <DevTiles params={params} />;
   if (!templateId) return <Index />;
   return <DevCard key={params.toString()} params={params} />;
 };
@@ -178,3 +180,19 @@ const DevCard: React.FC<{ params: URLSearchParams }> = ({ params }) => {
 };
 
 export default DevCardsPage;
+
+/** `/dev/cards?tiles=1&tpl=…`: the Campaigns-page tiles (a preset next to `tpl`), for layout QA. */
+const DevTiles: React.FC<{ params: URLSearchParams }> = ({ params }) => {
+  const base = templates.find((t) => t.id === (params.get('t') ?? 'cookie-classic')) ?? templates[0]!;
+  const custom = { ...base, id: 'dev-tpl', ...(params.get('tpl') ? JSON.parse(params.get('tpl')!) : {}) };
+  const noop = () => {};
+  return (
+    <div className="min-h-screen bg-neutral-50 p-6">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-10 pb-12 px-2 md:px-4">
+        {[base, custom].map((card) => (
+          <ResponsiveCardItem key={card.id} card={card} onEdit={noop} onDelete={noop} onShowSignupQr={noop} onToggleEnabled={noop} toggleBusy={false} />
+        ))}
+      </div>
+    </div>
+  );
+};
