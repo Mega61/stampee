@@ -221,6 +221,73 @@ export interface CardPlaysTable {
   stamps_awarded: ColumnType<number, number | undefined, number>;
 }
 
+// 0019_gift_cards.sql — gift cards ("tarjetas regalo").
+export type GiftCardStatus = 'pending_payment' | 'active' | 'redeemed' | 'void';
+export type GiftCardSource = 'sale' | 'advent' | 'manual';
+export type GiftCardEventType =
+  | 'created' | 'paid' | 'recipient_set' | 'redeemed' | 'unredeemed' | 'voided' | 'updated' | 'viewed';
+
+export interface GiftCardTiersTable {
+  id: ColumnType<string, string | undefined, string>;
+  owner_id: string;
+  name: string;
+  amount_cop: number;
+  description: ColumnType<string, string | undefined, string>;
+  validity_days: ColumnType<number, number | undefined, number>;
+  is_enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  sort: ColumnType<number, number | undefined, number>;
+  design: ColumnType<Record<string, unknown> | null, Record<string, unknown> | null | undefined, Record<string, unknown> | null>;
+  created_at: Generated<Date>;
+}
+
+type Nullable<T> = ColumnType<T | null, T | null | undefined, T | null>;
+
+export interface GiftCardsTable {
+  id: ColumnType<string, string | undefined, string>;
+  unique_id: ColumnType<string, string | undefined, string>;
+  owner_id: string;
+  code: string;
+  tier_id: Nullable<string>;
+  tier_name: ColumnType<string, string | undefined, string>;
+  amount_cop: number;
+  status: ColumnType<GiftCardStatus, GiftCardStatus | undefined, GiftCardStatus>;
+  funded: boolean;
+  source: GiftCardSource;
+  buyer_customer_id: Nullable<string>;
+  buyer_name: ColumnType<string, string | undefined, string>;
+  buyer_phone: ColumnType<string, string | undefined, string>;
+  recipient_name: Nullable<string>;
+  recipient_phone: Nullable<string>;
+  recipient_customer_id: Nullable<string>;
+  message: ColumnType<string, string | undefined, string>;
+  valid_from: Nullable<string>;
+  valid_to: Nullable<string>;
+  min_ticket_cop: Nullable<number>;
+  transferable: ColumnType<boolean, boolean | undefined, boolean>;
+  rules: ColumnType<Record<string, unknown>, Record<string, unknown> | undefined, Record<string, unknown>>;
+  paid_at: Nullable<Date>;
+  paid_method: Nullable<string>;
+  paid_amount_cop: Nullable<number>;
+  paid_ref: Nullable<string>;
+  redeemed_at: Nullable<Date>;
+  redeemed_ref: Nullable<string>;
+  redeemed_amount_cop: Nullable<number>;
+  voided_at: Nullable<Date>;
+  void_reason: Nullable<string>;
+  external_ref: Nullable<string>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface GiftCardEventsTable {
+  id: Generated<number>;
+  gift_card_id: string;
+  type: GiftCardEventType;
+  data: ColumnType<Record<string, unknown>, Record<string, unknown> | undefined, Record<string, unknown>>;
+  actor_name: Nullable<string>;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   users: UsersTable;
   profiles: ProfilesTable;
@@ -239,4 +306,7 @@ export interface Database {
   wallet_notifications: WalletNotificationsTable;
   wallet_job_runs: WalletJobRunsTable;
   wallet_pass_events: WalletPassEventsTable;
+  gift_card_tiers: GiftCardTiersTable;
+  gift_cards: GiftCardsTable;
+  gift_card_events: GiftCardEventsTable;
 }
