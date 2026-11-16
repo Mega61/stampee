@@ -193,11 +193,9 @@ const PageStyles = () => (
 
 const Terms: React.FC<{ gift: PublicGift }> = ({ gift }) => (
   <ul className="space-y-2 text-[13px] leading-relaxed" style={{ color: '#5F534B' }}>
-    <li>Se usa completa en una sola visita. Presenta el código al pagar.</li>
-    <li>Si el servicio cuesta más, pagas la diferencia con otro medio. Si cuesta menos, el saldo no se devuelve.</li>
-    {gift.minTicketCop ? <li>Aplica en servicios desde {formatCop(gift.minTicketCop)}.</li> : null}
-    {!gift.funded && <li>Es un beneficio promocional: no se acumula con otras promociones.</li>}
-    <li>No se cambia por dinero.</li>
+    {gift.terms.map((t) => (
+      <li key={t}>{t}</li>
+    ))}
   </ul>
 );
 

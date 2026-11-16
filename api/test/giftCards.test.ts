@@ -289,6 +289,19 @@ describe('redeem / unredeem', () => {
   });
 });
 
+describe('giftCardTerms', () => {
+  it('builds the holder terms from the card rules', () => {
+    const base = { min_ticket_cop: null, funded: true, transferable: true, rules: {} } as const;
+    const sold = lib.giftCardTerms(base);
+    expect(sold[0]).toMatch(/una sola visita/);
+    expect(sold.join(' ')).not.toMatch(/promocional|desde/);
+    const promo = lib.giftCardTerms({ min_ticket_cop: 60000, funded: false, transferable: true, rules: { recipient: 'new_or_dormant' } });
+    expect(promo.join(' ')).toMatch(/desde \$\s?60\.000/);
+    expect(promo.join(' ')).toMatch(/promocional/);
+    expect(promo.join(' ')).toMatch(/no viene hace un tiempo/);
+  });
+});
+
 describe('expiry derivation', () => {
   it('active past valid_to is "expired" in DTOs, filters and stats', async () => {
     const card = await order();

@@ -610,12 +610,33 @@ export const toGiftCardDto = (r: GiftCardRow, publicBase: string | null, today: 
   voidReason: r.void_reason,
   externalRef: r.external_ref,
   publicUrl: publicBase ? `${publicBase}/${r.unique_id}` : null,
+  terms: giftCardTerms(r),
   createdAt: iso(r.created_at)!,
 });
 
 export type GiftCardDto = ReturnType<typeof toGiftCardDto>;
 
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? '';
+
+const copFormatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+
+/**
+ * The card's terms, in Spanish, as shown to the holder. Single source for the
+ * public /regalo page and for integrations (the advent "Mis regalos").
+ */
+export const giftCardTerms = (r: Pick<GiftCardRow, 'min_ticket_cop' | 'funded' | 'transferable' | 'rules'>): string[] => {
+  const rules = rulesOf(r as GiftCardRow);
+  const terms = [
+    'Se usa completa en una sola visita. Presenta el código al pagar.',
+    'Si el servicio cuesta más, pagas la diferencia con otro medio. Si cuesta menos, el saldo no se devuelve.',
+  ];
+  if (r.min_ticket_cop) terms.push(`Aplica en servicios desde ${copFormatter.format(r.min_ticket_cop)}.`);
+  if (rules.recipient === 'new_or_dormant') terms.push('Es para alguien que aún no conoce el estudio o que no viene hace un tiempo.');
+  if (!r.funded) terms.push('Es un beneficio promocional: no se acumula con otras promociones.');
+  if (!r.transferable) terms.push('Es personal: solo la puede usar quien la recibió.');
+  terms.push('No se cambia por dinero.');
+  return terms;
+};
 
 // ---------------------------------------------------------------- per customer
 
@@ -636,6 +657,7 @@ export const toPublicGiftCardDto = (r: GiftCardRow, publicBase: string | null, t
   validTo: r.valid_to,
   minTicketCop: r.min_ticket_cop,
   transferable: r.transferable,
+  terms: giftCardTerms(r),
   publicUrl: publicBase ? `${publicBase}/${r.unique_id}` : null,
 });
 

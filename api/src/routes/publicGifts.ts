@@ -8,7 +8,7 @@ import { parseBody } from '../lib/dto.js';
 import { normalizeSlug } from '../lib/slug.js';
 import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
 import { publicImageUrl } from './publicImages.js';
-import { effectiveStatus, firstName, logGiftEvent, setRecipientOnce, type GiftCardRow } from '../lib/giftCards.js';
+import { effectiveStatus, firstName, giftCardTerms, logGiftEvent, setRecipientOnce, type GiftCardRow } from '../lib/giftCards.js';
 import { PublicRecipientBody } from '../schemas/giftCards.js';
 
 const PUBLIC_GET = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
@@ -63,6 +63,7 @@ const toPublicGift = async (
     validFrom: card.valid_from,
     validTo: card.valid_to,
     minTicketCop: card.min_ticket_cop,
+    terms: giftCardTerms(card),
     business: { name: owner.business_name, logo: await businessLogo(owner.id), slug: owner.slug },
     design: tier?.design ?? null,
   };

@@ -105,6 +105,8 @@ export interface PublicGift {
   validFrom: string | null;
   validTo: string | null;
   minTicketCop: number | null;
+  /** Holder-facing terms, built by the API (single source). */
+  terms: string[];
   business: { name: string; logo: string | null; slug: string | null };
   design: Record<string, unknown> | null;
 }
