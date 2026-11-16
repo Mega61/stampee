@@ -30,6 +30,7 @@ const DashboardPage = lazy(() => import('./components/DashboardPage').then((modu
 const PublicCardPage = lazy(() => import('./components/PublicCardPage'));
 const DevCardsPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevCardsPage')) : null;
 const DevTicketPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevTicketPage')) : null;
+const DevAdventPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevAdventPage')) : null;
 const GiftCardPage = lazy(() => import('./components/gift/GiftCardPage'));
 const GiftCardsPage = lazy(() => import('./components/gift/GiftCardsPage'));
 const PublicCampaignSignupPage = lazy(() => import('./components/PublicCampaignSignupPage').then((module) => ({ default: module.PublicCampaignSignupPage })));
@@ -386,6 +387,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/:slug/:uniqueId" element={withSuspense(<PublicCardPage />)} />
         {DevCardsPage && <Route path="/dev/cards" element={withSuspense(<DevCardsPage />)} />}
         {DevTicketPage && <Route path="/dev/ticket" element={withSuspense(<DevTicketPage />)} />}
+        {DevAdventPage && <Route path="/dev/advent" element={withSuspense(<DevAdventPage />)} />}
         <Route path="/login" element={withSuspense(<LoginPage />)} />
         <Route path="/forgot-password" element={withSuspense(<ForgotPasswordPage />)} />
 

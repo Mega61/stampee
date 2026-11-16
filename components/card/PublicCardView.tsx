@@ -1,11 +1,15 @@
 // Composition of the animated public card. FROZEN after Wave 0: agents
 // change their own components (stubs below), not this file. Everything here
 // is in the lazy "card-fx" chunk.
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import { LazyMotion, MotionConfig, domAnimation, useReducedMotion } from 'motion/react';
 import { LoyaltyCard } from '../LoyaltyCard';
 import { PublicCardShell } from '../PublicCardShell';
 import { buildStaffScanEntryUrl } from '../../lib/links';
+import { buildBookingWhatsAppUrl } from '../../lib/whatsapp';
+import { useAdvent } from '../../lib/advent/useAdvent';
+import { doorContext, readyCount } from '../../lib/advent/viewModel';
+import type { AdventController } from '../../lib/advent/types';
 import { createFxBus } from '../../lib/card/fxBus';
 import { useFxTheme } from '../../lib/card/useFxTheme';
 import { recolorLottie } from '../../lib/card/lottieRecolor';
@@ -19,6 +23,12 @@ import { MomentsLayer } from './MomentsLayer';
 import { InstallPrompt } from './InstallPrompt';
 import { WeeklyTicket } from './WeeklyTicket';
 import { WalletButtons } from './WalletButtons';
+import { CardFlip, peekKey } from './CardFlip';
+import { FlipChip, SealBadge, useAdventFonts } from './advent/FrontHooks';
+import { preloadAdventAssets } from './advent/assets';
+
+// The calendar's back face loads only when there is a calendar.
+const AdventBoard = lazy(() => import('./advent/AdventBoard'));
 
 export interface PublicCardViewProps {
   slug: string;
@@ -34,6 +44,10 @@ export interface PublicCardViewProps {
   game: GameState | null;
   refresh: () => Promise<void>;
   applyCardUpdate: (patch: Partial<IssuedCard>) => void;
+  /** /dev/advent: a mock calendar instead of the API. */
+  advent?: AdventController;
+  /** /dev/advent: force the reduced-motion path for the calendar. */
+  adventReducedMotion?: boolean;
 }
 
 /** Slots that must start hidden/wrapped until their moment plays. */
@@ -109,6 +123,32 @@ export const PublicCardView: React.FC<PublicCardViewProps> = (props) => {
   };
 
   const isRedeemed = card.status === 'Redeemed';
+
+  // Advent calendar on the back. Keyed by the card id for now: the API
+  // resolves a card id to its customer.
+  const liveAdvent = useAdvent(slug, card.uniqueId, !props.advent && !isRedeemed);
+  const advent = props.advent ?? liveAdvent;
+  const adventState = isRedeemed ? null : advent.state;
+  const adventMotionReduced = props.adventReducedMotion ?? reducedMotion;
+  const [flipped, setFlipped] = useState(false);
+  const [peekPulse, setPeekPulse] = useState(0);
+  useAdventFonts(!!adventState);
+  const flip = useCallback(
+    (next: boolean) => {
+      if (next) preloadAdventAssets(adventMotionReduced);
+      setFlipped(next);
+    },
+    [adventMotionReduced],
+  );
+  const { applyCardUpdate } = props;
+  const onAdventCard = useCallback(
+    (update: { uniqueId: string; stamps: number }) => {
+      if (update.uniqueId === card.uniqueId) applyCardUpdate({ stamps: update.stamps });
+    },
+    [applyCardUpdate, card.uniqueId],
+  );
+  const ready = adventState ? readyCount(adventState.doors, advent.now(), doorContext(adventState)) : 0;
+
   const subtitle = isRedeemed ? undefined : getAlmostThereSubtitle(card.stamps, template.totalStamps, template.rewardName);
   const transformGiftAnimation = useCallback((data: object) => recolorLottie(data, theme), [theme]);
 
@@ -123,30 +163,62 @@ export const PublicCardView: React.FC<PublicCardViewProps> = (props) => {
             overlay={<MomentsLayer />}
           >
             <TiltSurface className="h-full w-full">
-              <LoyaltyCard
-                template={template}
-                mode="public"
-                readOnly={true}
-                currentStamps={card.stamps}
-                customerName={customerName}
-                cardId={card.uniqueId}
-                qrValue={buildStaffScanEntryUrl(slug, card.uniqueId)}
+              <CardFlip
                 className="h-full w-full"
-                history={card.history}
-                isRedeemed={isRedeemed}
-                rewardRevealMode="external"
-                renderStampGrid={(ctx) => <PublicStampGrid ctx={ctx} />}
-                wrapFront={(node) => <TiltFront>{node}</TiltFront>}
-                subtitle={subtitle}
-                transformGiftAnimation={transformGiftAnimation}
-                footerSlot={
-                  isRedeemed ? null : (
-                    <div className="mt-5 flex w-full flex-col items-center gap-3">
-                      <WeeklyTicket />
-                      <WalletButtons />
-                      <InstallPrompt />
-                    </div>
-                  )
+                flipped={flipped && !!adventState}
+                onFlippedChange={flip}
+                reducedMotion={adventMotionReduced}
+                peekStorageKey={adventState ? peekKey(adventState.year) : null}
+                onPeek={() => setPeekPulse((n) => n + 1)}
+                front={
+                  <LoyaltyCard
+                    template={template}
+                    mode="public"
+                    readOnly={true}
+                    currentStamps={card.stamps}
+                    customerName={customerName}
+                    cardId={card.uniqueId}
+                    qrValue={buildStaffScanEntryUrl(slug, card.uniqueId)}
+                    className="h-full w-full"
+                    history={card.history}
+                    isRedeemed={isRedeemed}
+                    rewardRevealMode="external"
+                    renderStampGrid={(ctx) => <PublicStampGrid ctx={ctx} />}
+                    wrapFront={(node) => <TiltFront>{node}</TiltFront>}
+                    subtitle={subtitle}
+                    transformGiftAnimation={transformGiftAnimation}
+                    headerSlot={
+                      adventState ? (
+                        <SealBadge ready={ready} eligible={adventState.eligible} reducedMotion={adventMotionReduced} onClick={() => flip(true)} />
+                      ) : undefined
+                    }
+                    footerSlot={
+                      isRedeemed ? null : (
+                        <div className="mt-5 flex w-full flex-col items-center gap-3">
+                          {adventState && <FlipChip onClick={() => flip(true)} pulse={peekPulse} />}
+                          <WeeklyTicket />
+                          <WalletButtons />
+                          <InstallPrompt />
+                        </div>
+                      )
+                    }
+                  />
+                }
+                back={
+                  adventState ? (
+                    <Suspense fallback={<div className="h-full w-full" style={{ background: '#241812' }} />}>
+                      <AdventBoard
+                        controller={advent}
+                        customerName={customerName}
+                        businessName={template.name}
+                        bookingUrl={buildBookingWhatsAppUrl(template.social?.whatsapp)}
+                        reducedMotion={adventMotionReduced}
+                        visible={flipped}
+                        onFlipBack={() => flip(false)}
+                        onCardUpdate={onAdventCard}
+                      />
+                    </Suspense>
+                  ) : null
                 }
               />
             </TiltSurface>
