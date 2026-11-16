@@ -124,7 +124,7 @@ Opening one shows it read-only.
 | 5 | Late opening is allowed: an unlocked door stays openable until the calendar's `opens_until` (Dec 31). **Flash** doors close at `flash_until` (48 h). |
 | 6 | Opening is idempotent: one row per (door, customer), and replays return the same gift. |
 | 7 | Gifts are redeemed in the studio's panel, never self-served. Each gift has its own `valid_from`/`valid_to`. |
-| 10 | **Every gift carries its terms and conditions** (`terms`: a list of short lines), plus the calendar's common terms. They are shown in the opening reveal ("Términos y condiciones"), in every "Mis regalos" item (expandable) and on the "Mostrar en caja" screen, so the front desk reads the same rules the client read. |
+| 10 | **Every gift carries its terms and conditions** (`terms`: a list of short lines), plus the calendar's common terms. They are shown in the opening reveal ("Términos y condiciones"), in every "Mis regalos" item (expandable) and on the "Mostrar en caja" screen, so the front desk reads the same rules the client read. For the gift_card door, the gift card's own `terms` (built by `giftCardTerms(row)` on the gift-card branch, and identical to its `/regalo` page) win over the door's `terms`, so there is a single source. |
 | 8 | Bonus-stamp gifts follow the existing rule: **a gift never completes a card** (same guard as `POST /cards/gift-stamps`). |
 | 9 | The back face is a horizontal **flip** (physical card). The existing vertical swipe to "Historial" stays on the front. |
 
