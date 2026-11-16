@@ -23,8 +23,18 @@ const Spinner = () => (
 );
 
 export const PublicCardPage: React.FC = () => {
-  const { slug, uniqueId } = useParams<{ slug: string; uniqueId: string }>();
-  const { loading, data, refresh, applyCardUpdate } = usePublicCard(slug, uniqueId);
+  // The URL id is the customer's permanent link or an old card link (0018);
+  // everything per card (holdout arm, views, wallet, game) uses the card id.
+  const { slug, uniqueId: linkId } = useParams<{ slug: string; uniqueId: string }>();
+  const { loading, data, refresh, applyCardUpdate } = usePublicCard(slug, linkId);
+  const uniqueId = data?.card.uniqueId;
+
+  // Old card links converge on the permanent one without a navigation.
+  useEffect(() => {
+    if (!slug || !data?.canonicalId || data.canonicalId === linkId) return;
+    const { search, hash } = window.location;
+    window.history.replaceState(window.history.state, '', `/${slug}/${data.canonicalId}${search}${hash}`);
+  }, [slug, linkId, data?.canonicalId]);
   // The experiment arm comes from the card id only. The kill switch also
   // renders the classic card, but those views must not be counted as
   // holdout, so the beacon is off while it's active.

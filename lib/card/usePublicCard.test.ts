@@ -10,6 +10,8 @@ const data = (history: Transaction[], stamps: number, extra: Partial<PublicCardD
   customer: { id: 'x', name: 'Ana' },
   template: {} as PublicCardData['template'],
   game: null,
+  canonicalId: null,
+  otherCards: [],
   ...extra,
 });
 
@@ -31,5 +33,13 @@ describe('nextPollDelay', () => {
     expect(nextPollDelay('Active', BACKOFF_AFTER)).toBe(SLOW_POLL_MS);
     expect(nextPollDelay('Redeemed', 0)).toBeNull();
     expect(nextPollDelay(undefined, 0)).toBeNull();
+  });
+});
+
+describe('cardFingerprint and the permanent link', () => {
+  it('changes when the current card changes under the same link', () => {
+    const before = data([], 3);
+    const after = { ...before, card: { ...before.card, uniqueId: 'u2', stamps: 3 } };
+    expect(cardFingerprint(after)).not.toBe(cardFingerprint(before));
   });
 });
