@@ -56,7 +56,7 @@ const setCampaignBrand = async (campaignId: string, colors: Record<string, strin
 };
 
 describe('GET /public/cards/:slug/:uniqueId/manifest.webmanifest', () => {
-  it('returns a per-card manifest scoped to the card on the SPA origin', async () => {
+  it("returns a manifest scoped to the customer's permanent link on the SPA origin", async () => {
     const campaignId = await insertCampaign(db.pool, owner.userId, { name: 'Uñas' });
     const uniqueId = await insertCard({ campaignId, snapshotBackground: 'bg-[#F4E1D2]' });
 
@@ -70,7 +70,12 @@ describe('GET /public/cards/:slug/:uniqueId/manifest.webmanifest', () => {
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
 
     const manifest = res.json();
-    const scope = `http://localhost:3000/${owner.slug}/${uniqueId}`;
+    // The installed app opens the customer's permanent link (0018), not the card.
+    const { rows } = await db.pool.query<{ public_id: string }>(
+      'select c.public_id from loyalty.customers c join loyalty.issued_cards ic on ic.customer_id = c.id where ic.unique_id = $1',
+      [uniqueId],
+    );
+    const scope = `http://localhost:3000/${owner.slug}/${rows[0]!.public_id}`;
     expect(manifest).toMatchObject({
       id: scope,
       name: 'Éclat Studio',
