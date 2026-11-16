@@ -80,6 +80,14 @@ Opening one shows it read-only.
   "Mis regalos".
 - Gift cards where she is buyer or recipient (`listGiftCardsForCustomer` from
   the gift-card branch).
+  - **Buyer, or confirmed recipient** (`locked:false`): the full item with
+    code and gift link.
+  - **Phone-only match** (`locked:true`): amount, status, "De parte de …",
+    expiry and terms, but no code and no link. It renders `lockedHint`
+    ("Ábrela con el link que te llegó por WhatsApp.").
+  - The gift card keeps its own link (`/:slug/regalo/:id`), which never
+    redirects to a customer page. Rules in `docs/GIFT_CARDS.md` on the
+    gift-card branch.
 - The "unopened gift" badge, and view beacons (`card_views.customer_id`).
 - **These stay per card:** stamps, rewards, the weekly scratch game (its rules
   read the card's campaign), and staff scan `/:slug/scan/:uniqueId`. A QR built
