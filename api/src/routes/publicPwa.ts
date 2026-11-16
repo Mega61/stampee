@@ -344,7 +344,7 @@ export const publicPwaRoutes: FastifyPluginAsync = async (app) => {
 
       const card = await db
         .selectFrom('issued_cards')
-        .select(['unique_id', 'campaign_id', 'template_snapshot'])
+        .select(['unique_id', 'campaign_id', 'template_snapshot', 'customer_id'])
         .where('unique_id', '=', req.params.uniqueId)
         .where('owner_id', '=', owner.id)
         .executeTakeFirst();
@@ -360,10 +360,18 @@ export const publicPwaRoutes: FastifyPluginAsync = async (app) => {
         background = colorsBackground(campaign?.colors);
       }
 
+      // The installed app opens the customer's permanent link, so it keeps
+      // working when she gets a new card (0018).
+      const customer = await db
+        .selectFrom('customers')
+        .select('public_id')
+        .where('id', '=', card.customer_id)
+        .executeTakeFirst();
+
       const manifest = buildManifest({
         businessName: owner.business_name ?? '',
         slug: owner.slug,
-        uniqueId: card.unique_id,
+        uniqueId: customer?.public_id ?? card.unique_id,
         background: background ?? DEFAULT_BG,
       });
       return reply

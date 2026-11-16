@@ -7,11 +7,25 @@ import { api } from '../api';
 import { fromStoredTemplate } from '../templateSerialization';
 import type { GameState, IssuedCard, StoredTemplate, Template } from '../../types';
 
+/** A card of the customer other than the current one (0018). */
+export interface OtherPublicCard {
+  uniqueId: string;
+  campaignName: string;
+  stamps: number;
+  totalStamps: number | null;
+  status: IssuedCard['status'];
+  completedDate: string | null;
+  createdAt: string;
+}
+
 export interface PublicCardData {
   card: IssuedCard;
   customer: { id: string; name: string };
   template: Template;
   game: GameState | null;
+  /** The customer's permanent link id; the URL is rewritten to it. */
+  canonicalId: string | null;
+  otherCards: OtherPublicCard[];
 }
 
 type PublicCardResponse = {
@@ -19,6 +33,8 @@ type PublicCardResponse = {
   customer: { id: string; name: string };
   campaign: Record<string, unknown> | null;
   game?: GameState | null;
+  canonicalId?: string;
+  otherCards?: OtherPublicCard[];
 };
 
 export const POLL_MS = 15_000;
@@ -43,7 +59,14 @@ export const toPublicCardData = (data: PublicCardResponse): PublicCardData | nul
       gameMonthlyCap: campaign.gameMonthlyCap,
     };
   }
-  return { card, customer: data.customer, template, game: data.game ?? null };
+  return {
+    card,
+    customer: data.customer,
+    template,
+    game: data.game ?? null,
+    canonicalId: data.canonicalId ?? null,
+    otherCards: data.otherCards ?? [],
+  };
 };
 
 /**
@@ -59,6 +82,8 @@ export const cardFingerprint = (data: PublicCardData | null) => {
     null,
   );
   return [
+    // The current card can change under the same link (a new card after a redemption).
+    card.uniqueId,
     card.stamps,
     card.status,
     history.length,

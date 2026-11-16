@@ -87,6 +87,8 @@ export interface CustomersTable {
   email: string;
   mobile: string | null;
   status: ColumnType<'Active' | 'Inactive', 'Active' | 'Inactive' | undefined, 'Active' | 'Inactive'>;
+  /** Permanent public link id (0018): /:slug/<public_id>. */
+  public_id: ColumnType<string, string | undefined, string>;
   created_at: Generated<Date>;
 }
 

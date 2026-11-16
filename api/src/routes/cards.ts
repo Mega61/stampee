@@ -35,7 +35,7 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
     // Customer + campaign must belong to current owner scope.
     const customer = await db
       .selectFrom('customers')
-      .select('id')
+      .select(['id', 'public_id'])
       .where('id', '=', body.customerId)
       .where('owner_id', '=', claims.ownerScopeId)
       .executeTakeFirst();
@@ -88,7 +88,9 @@ export const cardRoutes: FastifyPluginAsync = async (app) => {
       .selectAll()
       .where('id', '=', id)
       .executeTakeFirstOrThrow();
-    return { ok: true, data: toIssuedCardDto(row as IssuedCardRow) };
+    // customerPublicId: the customer's permanent link, so integrations never
+    // send the card id (0018).
+    return { ok: true, data: { ...toIssuedCardDto(row as IssuedCardRow), customerPublicId: customer.public_id } };
   });
 
   // PATCH /cards/:id

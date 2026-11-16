@@ -86,6 +86,7 @@ export type CustomerRow = {
   email: string;
   mobile: string | null;
   status: 'Active' | 'Inactive';
+  public_id: string;
   created_at: Date | string;
 };
 
@@ -95,6 +96,7 @@ export const toCustomerDto = (r: CustomerRow) => ({
   email: r.email,
   mobile: r.mobile ?? undefined,
   status: r.status,
+  publicId: r.public_id,
 });
 
 export type IssuedCardRow = {

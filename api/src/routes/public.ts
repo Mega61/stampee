@@ -16,6 +16,12 @@ import { normalizeSlug } from '../lib/slug.js';
 import { computeGameState, type GameCampaign } from '../lib/game.js';
 import { publicImageUrl } from './publicImages.js';
 import { rejectMalformedUniqueId } from '../lib/uniqueId.js';
+import { resolvePublicCustomer } from '../lib/publicCustomer.js';
+
+const snapshotTotalStamps = (snapshot: unknown): number | null => {
+  const total = (snapshot as { totalStamps?: unknown } | null)?.totalStamps;
+  return typeof total === 'number' ? total : null;
+};
 
 const PublicSignupBody = z.object({
   name: z.string().trim().min(1, 'Name is required.').max(120),
@@ -37,34 +43,17 @@ const PUBLIC_POST_SIGNUP = { config: { rateLimit: { max: 5, timeWindow: '1 minut
 export const publicRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', rejectMalformedUniqueId);
 
-  // GET /public/cards/:slug/:uniqueId — anonymous loyalty-card view.
+  // GET /public/cards/:slug/:uniqueId — anonymous loyalty-card view. The id is
+  // the customer's permanent link (public_id) or any of her card ids; the page
+  // always shows her current card (lib/publicCustomer.ts).
   app.get<{ Params: { slug: string; uniqueId: string } }>(
     '/public/cards/:slug/:uniqueId',
     PUBLIC_GET,
     async (req) => {
-      const slug = normalizeSlug(req.params.slug);
-      const owner = await db
-        .selectFrom('profiles')
-        .select(['id', 'slug', 'business_name'])
-        .where('slug', '=', slug)
-        .where('role', '=', 'owner')
-        .executeTakeFirst();
-      if (!owner) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
-
-      const card = (await db
-        .selectFrom('issued_cards')
-        .selectAll()
-        .where('unique_id', '=', req.params.uniqueId)
-        .where('owner_id', '=', owner.id)
-        .executeTakeFirst()) as IssuedCardRow | undefined;
+      const resolved = await resolvePublicCustomer(db, req.params.slug, req.params.uniqueId);
+      const card = resolved.current;
       if (!card) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
-
-      const customer = await db
-        .selectFrom('customers')
-        .select(['id', 'name'])
-        .where('id', '=', card.customer_id)
-        .executeTakeFirst();
-      if (!customer) throw new AppError(404, 'NOT_FOUND', 'Card not found.');
+      const customer = resolved.customer;
 
       let campaign: Awaited<ReturnType<typeof toCampaignDtoSigned>> | null = null;
       let gameCampaign: GameCampaign | null = null;
@@ -111,6 +100,18 @@ export const publicRoutes: FastifyPluginAsync = async (app) => {
           customer: { id: customer.id, name: customer.name },
           campaign,
           game,
+          canonicalId: customer.public_id,
+          otherCards: resolved.cards
+            .filter((c) => c.id !== card.id)
+            .map((c) => ({
+              uniqueId: c.unique_id,
+              campaignName: c.campaign_name,
+              stamps: c.stamps,
+              totalStamps: snapshotTotalStamps(c.template_snapshot),
+              status: c.status,
+              completedDate: c.completed_date ?? null,
+              createdAt: new Date(c.created_at).toISOString(),
+            })),
         },
       };
     },
