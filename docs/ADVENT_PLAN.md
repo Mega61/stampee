@@ -273,6 +273,47 @@ whenever the countdown hits zero.
 - "Mostrar en caja" opens a full-screen sheet with the code in large type plus
   a QR code (`react-qr-code`, value = code) for the front desk.
 
+### 5.5 Motion and 3D: the same Christmas as the landing
+
+The landing's Christmas (branch `feat/navidad` in golden-beauty-studio-landing,
+`src/app/[lang]/_components/season/`) sets the visual language, and the card
+reuses it so the website and the card look like the same studio:
+
+- **Pan de oro instead of dot snow.** `GoldLeaf.tsx` draws irregular gold
+  leaves that fall slowly, sway and turn over, flashing pale gold when they face
+  the light. Port it as `components/card/advent/GoldLeaf.ts` (canvas, same
+  colors) for the back face's ambient fall and the burst when a door opens. It
+  runs only while the back is visible and the tab is visible, with fewer leaves
+  on low-end phones.
+- **The same gold confetti.** `season/confetti.ts` (`goldBurst`) is the
+  confetti for the last door (gift card), so it matches the landing's snowman
+  easter egg.
+- **3D renders with raea from Polyfork models** (low-poly, free for commercial
+  use, no attribution required), recolored in the brand palette (gold, moka,
+  ivory, wine red as an accent). They are rendered offline with the raea CLI
+  into small files that ship as static assets in `public/advent/`. Nothing
+  renders 3D on the phone. Planned assets:
+
+| Asset | Where | Format / budget |
+|---|---|---|
+| Gold gift box whose lid pops open with light inside (≈1.2 s, one shot) | Door opening: it plays inside the door as the two leaves swing open, before the gift ticket rises | Animated WebP with alpha (works on iOS 14+ and Android), ≤ 250 KB; poster frame for reduced motion |
+| Hanging gold baubles (the landing's `ornamentos` loop, re-rendered at card size) | Top of the back face, hanging from the string lights | WebP-alpha loop ≤ 200 KB, or webm/mp4 on the moka background if alpha costs too much |
+| Gold star turning slowly | Over door 24 while it's ready | WebP-alpha loop ≤ 120 KB |
+| Gold snowman (the landing's `snowman.webp`), confetti on tap | Corner of the back face: the same easter egg as the landing | Static WebP ≈ 18 KB + `goldBurst` |
+| Gold presents and tree (the landing's `presents.webp`, `tree.webp`) | "Mis regalos" empty state; locked calendar ("Tu calendario te espera") | Static WebP ≈ 15–17 KB each |
+
+- **Loading:** assets load only when the card is flipped to the back the first
+  time (`<link rel=preload>` after the flip starts). The total for the back face
+  is ≤ 700 KB, and the front never pays for it.
+- **Fallbacks:** if an asset is missing or fails, the CSS and SVG versions from
+  the approved prototype (string lights, wrapped door 24, sprigs) stay as the
+  base layer, as the landing does with its CSS baubles under the video. With
+  reduced motion, poster frames only and no falling leaves.
+- **Coordination:** reuse the landing session's Polyfork model ids, raea
+  compositions and material palette instead of re-modelling, so both renders
+  match light for light. The raea sources and models go in the private workspace
+  (`marketing/`), only the rendered files in this repo.
+
 ## 6. Panel (golden-beauty-studio-landing, `admin/`)
 
 MVP, ready before the first coupon door (the first door is a stamp):
@@ -319,7 +360,8 @@ Today 2026-11-15. The first door unlocks Wed 2026-12-02 07:00.
 | 0 | Nov 18 | Migration 0020, `db/types.ts`, shared types in `types.ts`, `GiftCardIssuer` interface, API contract (zod schemas), `/dev/advent` mock data | Typecheck green; this doc updated with anything that changed |
 | 1a | Nov 16–19 | **Backend:** `lib/advent.ts`, routes, double-stamp hook, seed script, tests | `api npm test` green |
 | 1b | Nov 16–20 | **Flip:** `CardFlip` + gesture arbitration + affordances, on mock data | Works on a real iPhone + Android; vertical Historial swipe and stamp taps unaffected |
-| 2a | Nov 20–25 | **Board + opening animation + Mis regalos** | Reviewed on `/dev/advent` at 390 px; reduced-motion path; `card-visual-qa.mjs` |
+| A | Nov 18–21 | **3D assets** (§5.5): raea renders from Polyfork models, matched to the landing's Navidad; animated WebP with alpha + posters, within budget | Reviewed by the user next to the landing; sizes within budget |
+| 2a | Nov 20–25 | **Board + opening animation + Mis regalos** (pan de oro, confetti and 3D assets wired in) | Reviewed on `/dev/advent` at 390 px; reduced-motion path; `card-visual-qa.mjs` |
 | 2b | Nov 20–23 | **Panel MVP** (landing repo) | "Marcar usado" works against a local API; production build passes |
 | 3 | Nov 26–27 | Integration: real API + SPA, staging seed, end-to-end on a phone (open → inventory → panel redeem); `/code-review` | PRs open (never merged by the agent) |
 | — | Nov 28–30 | **The user:** merge + deploy, run `seed-advent.ts` with the real door file, enable the calendar, brief the front desk and the técnica, WhatsApp launch message Dec 1 | |
