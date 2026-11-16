@@ -30,6 +30,8 @@ const DashboardPage = lazy(() => import('./components/DashboardPage').then((modu
 const PublicCardPage = lazy(() => import('./components/PublicCardPage'));
 const DevCardsPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevCardsPage')) : null;
 const DevTicketPage = import.meta.env.DEV ? lazy(() => import('./components/dev/DevTicketPage')) : null;
+const GiftCardPage = lazy(() => import('./components/gift/GiftCardPage'));
+const GiftCardsPage = lazy(() => import('./components/gift/GiftCardsPage'));
 const PublicCampaignSignupPage = lazy(() => import('./components/PublicCampaignSignupPage').then((module) => ({ default: module.PublicCampaignSignupPage })));
 
 const RouteLoader: React.FC = () => (
@@ -380,6 +382,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/:slug/staff" element={withSuspense(<StaffLoginPage />)} />
         <Route path="/:slug/scan/:uniqueId" element={<StaffScanEntryWrapper />} />
         <Route path="/:slug/join/:campaignId" element={withSuspense(<PublicCampaignSignupPage />)} />
+        <Route path="/:slug/regalo/:uniqueId" element={withSuspense(<GiftCardPage />)} />
         <Route path="/:slug/:uniqueId" element={withSuspense(<PublicCardPage />)} />
         {DevCardsPage && <Route path="/dev/cards" element={withSuspense(<DevCardsPage />)} />}
         {DevTicketPage && <Route path="/dev/ticket" element={withSuspense(<DevTicketPage />)} />}
@@ -426,6 +429,7 @@ const AppRoutes: React.FC = () => {
                   />
                 )
               } />
+              <Route path="/gift-cards" element={withSuspense(<GiftCardsPage />)} />
               <Route path="/customers" element={
                 withSuspense(
                   <CustomerDirectory

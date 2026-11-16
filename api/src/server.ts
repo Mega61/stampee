@@ -28,6 +28,8 @@ import { publicImageRoutes } from './routes/publicImages.js';
 import { publicGameRoutes } from './routes/publicGame.js';
 import { walletRoutes } from './routes/wallet.js';
 import { appleWalletRoutes } from './routes/appleWallet.js';
+import { giftCardRoutes } from './routes/giftCards.js';
+import { publicGiftRoutes } from './routes/publicGifts.js';
 import { startWalletScheduler } from './lib/wallet/scheduler.js';
 
 export const buildApp = async () => {
@@ -119,6 +121,9 @@ export const buildApp = async () => {
   await app.register(publicGameRoutes);
   await app.register(walletRoutes);
   await app.register(appleWalletRoutes);
+  // Gift cards (tarjetas regalo).
+  await app.register(giftCardRoutes);
+  await app.register(publicGiftRoutes);
 
   return app;
 };
