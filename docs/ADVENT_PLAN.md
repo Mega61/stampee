@@ -214,6 +214,7 @@ Today 2026-11-15. The first door unlocks Wed 2026-12-02 07:00.
 
 | Wave | Dates | Work | Done when |
 |---|---|---|---|
+| D | Nov 16–17 | **Visual design first.** Interactive prototype of every screen and state: front with "voltea" chip and unopened badge, flip, door board (all door states + countdown), opening sequence, last door with gift card, "Mis regalos", "Mostrar en caja", locked calendar, reduced motion. Built at 390 px with the brand kit. | **The user and the owner approve the look.** No frontend wave (1b, 2a) starts before this; backend (0, 1a) may run in parallel. |
 | 0 | Nov 16 | Migration 0018, `db/types.ts`, shared types in `types.ts`, `GiftCardIssuer` interface, API contract (zod schemas), `/dev/advent` mock data | Typecheck green; this doc updated with anything that changed |
 | 1a | Nov 16–19 | **Backend:** `lib/advent.ts`, routes, double-stamp hook, seed script, tests | `api npm test` green |
 | 1b | Nov 16–20 | **Flip:** `CardFlip` + gesture arbitration + affordances, on mock data | Works on a real iPhone + Android; vertical Historial swipe and stamp taps unaffected |
@@ -223,7 +224,7 @@ Today 2026-11-15. The first door unlocks Wed 2026-12-02 07:00.
 | — | Nov 28–30 | **The user:** merge + deploy, run `seed-advent.ts` with the real door file, enable the calendar, brief the front desk and the técnica, WhatsApp launch message Dec 1 | |
 | — | by Dec 20 | Gift cards merged + deployed; wire the real issuer | Last door tested on staging |
 
-Waves 1a/1b and 2a/2b can run in parallel worktrees: each wave owns
+The approved prototype is the reference for 1b/2a (motion timings, sizes, copy); deviations go back to the user. Waves 1a/1b and 2a/2b can run in parallel worktrees: each wave owns
 different files.
 
 ## 9. Not in scope (2026)
