@@ -20,7 +20,16 @@ interface FrontHandle {
   sheen: HTMLElement;
 }
 
-const TiltContext = createContext<{ register: (front: FrontHandle | null) => void } | null>(null);
+interface TiltApi {
+  register: (front: FrontHandle | null) => void;
+  /** Pause the tilt (the card is being flipped, or shows its back) and settle flat. */
+  setPaused: (paused: boolean) => void;
+}
+
+const TiltContext = createContext<TiltApi | null>(null);
+
+/** For CardFlip: tilt pauses while the card is dragged or turned around. */
+export const useTiltPause = () => useContext(TiltContext)?.setPaused ?? null;
 
 const PARALLAX_PX = 6;
 const ORIENTATION_DEG = 3;
@@ -37,7 +46,20 @@ export const TiltSurface: React.FC<{ children: React.ReactNode; className?: stri
   const trackRef = useRef(trackInteraction);
   trackRef.current = trackInteraction;
 
-  const api = useMemo(() => ({ register: (f: FrontHandle | null) => { front.current = f; } }), []);
+  const paused = useRef(false);
+  const release = useRef<(() => void) | null>(null);
+  const api = useMemo<TiltApi>(
+    () => ({
+      register: (f) => {
+        front.current = f;
+      },
+      setPaused: (p) => {
+        paused.current = p;
+        if (p) release.current?.();
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const surface = ref.current;
@@ -109,13 +131,22 @@ export const TiltSurface: React.FC<{ children: React.ReactNode; className?: stri
       kick();
     };
 
+    // Paused: drop the finger and spring back to flat.
+    release.current = () => {
+      pointer = null;
+      target.x = target.y = 0;
+      orient.x = orient.y = 0;
+      kick();
+    };
+
     const onDown = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse') return;
+      if (paused.current || e.pointerType === 'mouse') return;
       rect = surface.getBoundingClientRect();
       pointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
       aim(e.clientX, e.clientY, 0.55);
     };
     const onMove = (e: PointerEvent) => {
+      if (paused.current) return;
       if (e.pointerType === 'mouse') {
         pointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
         aim(e.clientX, e.clientY);
@@ -147,6 +178,10 @@ export const TiltSurface: React.FC<{ children: React.ReactNode; className?: stri
       const scale = maxDeg > 0 ? Math.min(1, ORIENTATION_DEG / maxDeg) : 0;
       orient.x = clamp((e.gamma - base.gamma) / 15) * scale;
       orient.y = clamp(-(e.beta - base.beta) / 15) * scale;
+      if (paused.current) {
+        orient.x = orient.y = 0;
+        return;
+      }
       if (!pointer) kick();
     };
     const DOE = typeof window !== 'undefined' ? (window as { DeviceOrientationEvent?: { requestPermission?: unknown } }).DeviceOrientationEvent : undefined;
@@ -171,6 +206,7 @@ export const TiltSurface: React.FC<{ children: React.ReactNode; className?: stri
       window.removeEventListener('pointercancel', onUp);
       window.removeEventListener('resize', onEnter);
       if (useGyro) window.removeEventListener('deviceorientation', onOrientation);
+      release.current = null;
       cancelAnimationFrame(raf);
       write(0, 0);
     };

@@ -57,6 +57,8 @@ interface LoyaltyCardProps {
   renderStampGrid?: (ctx: StampGridContext) => React.ReactNode;
   /** Extra content under the reward line on the front (game ticket, install, wallet). */
   footerSlot?: React.ReactNode;
+  /** Top-left of the front, beside the QR button; hides with it on the Historial slide. */
+  headerSlot?: React.ReactNode;
   /** Wraps the front-slide content (tilt surface). */
   wrapFront?: (node: React.ReactNode) => React.ReactNode;
   /** Replaces the tagline under the title. */
@@ -85,6 +87,7 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
     onStampRemoveTap,
     renderStampGrid,
     footerSlot,
+    headerSlot,
     wrapFront,
     subtitle,
     rewardRevealMode = 'modal',
@@ -409,9 +412,11 @@ export const LoyaltyCard: React.FC<LoyaltyCardProps> = ({
             
             {/* NEW: Top Header (QR Button Only) */}
             <div className={cn(
-                "absolute top-6 left-6 right-6 flex justify-end items-center z-30 transition-all duration-500",
+                "absolute top-6 left-6 right-6 flex items-center z-30 transition-all duration-500",
+                headerSlot ? "justify-between" : "justify-end",
                 currentSlide === 0 ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none"
             )}>
+                 {headerSlot}
                  {/* Right: QR Trigger */}
                  <button 
                     onClick={() => {
