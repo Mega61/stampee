@@ -88,6 +88,8 @@ describe('lookup: GET /customers/lookup', () => {
       stampsFromVisits: 1,
     });
     expect(client.cards[0].publicUrl).toMatch(/\/golden\/[0-9a-f-]{36}$/);
+    // The permanent customer link (0018), not the card id.
+    expect(client.cards[0].publicUrl.endsWith(`/golden/${client.publicId}`)).toBe(true);
     expect(client.cards[0].lastVisitAt).toBe(new Date(1_700_000_000_000).toISOString());
   });
 
