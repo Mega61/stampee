@@ -9,7 +9,7 @@ to "a customer can sign up and stamp their card through a browser."
 | Layer | Status | Files |
 |---|---|---|
 | 1 — Schema | ✅ **Built** | `api/test/helpers/db.ts`, `api/test/schema.test.ts` (11 tests) |
-| 2 — API integration | ✅ **Built** | `api/test/helpers/app.ts` + `auth.test.ts`, `staff.test.ts`, `cards.test.ts`, `public.test.ts`, `storage.test.ts`, `scope.test.ts` (60 tests) |
+| 2 — API integration | ✅ **Built** | `api/test/helpers/app.ts` + `auth.test.ts`, `staff.test.ts`, `cards.test.ts`, `public.test.ts`, `storage.test.ts`, `scope.test.ts`, `giftCards.test.ts` (gift cards: see `docs/GIFT_CARDS.md`) |
 | 3 — Frontend smoke | 📝 Spec only | no `e2e/` specs, `@playwright/test` not installed |
 | 4 — Manual checklist | ✅ **Runnable** | the checklist further down — needs a human + staging |
 | 5 — Data parity | 📝 Spec only | no `scripts/migrate-from-supabase.ts` (only needed if porting Supabase data) |
