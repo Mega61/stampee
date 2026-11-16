@@ -104,7 +104,18 @@ data: { reward: AdventReward & { customerId: string; customerName: string }; alr
 returns 200 with `alreadyRedeemed: true` (same convention as gift cards).
 
 ### `POST /advent/rewards/:code/unredeem`  body `{ actorName: string }`
-Undo a mistaken redeem. 200 if it was already available.
+Undo a mistaken redeem. 200 if it was already available. `data: { reward }`.
+
+`status=available` includes coupons whose `validFrom` is still in the future (show them with "Desde el …", no button).
+
+### `POST /advent/double-stamps`  body `{ customerId, visitRef, visitDate: 'YYYY-MM-DD' }`
+The CRM calls it once per completed visit that qualifies (semipermanente en adelante). Idempotent on `visitRef`.
+```ts
+data: { added: 0 | 1; reason?: 'NO_REWARD' | 'OUT_OF_RANGE' | 'ALREADY_APPLIED' | 'NO_ACTIVE_CARD' | 'FULL'; cardId?: string; stamps?: number }
+```
+
+### `PUT /advent/calendars/:year`  (owner/admin)
+Loads the private door file: `{ enabled, opensUntil, commonTerms[], doors: [{ doorNo, dayLabel, unlockAt, flashUntil?, kind, title, subtitle?, terms?, valueCop?, stamps?, url?, validFrom?, validTo?, config? }] }`. 409 `DOOR_IN_USE` if a door customers already opened would change kind or disappear.
 
 ### `GET /advent/summary`  (owner)
 Opens and redemptions per door, plus eligible customers.

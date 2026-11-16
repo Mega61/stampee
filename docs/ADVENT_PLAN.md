@@ -7,7 +7,7 @@
 
 The door contents (titles, values, validity) are **not in this repo**. They
 are marketing data seeded at deploy time from a private JSON file
-(`scripts/seed-advent.ts <file>`), so the surprise isn't published early and
+(`PUT /advent/calendars/:year` with the JSON), so the surprise isn't published early and
 the code stays generic. This plan only fixes the *kinds* of gift.
 
 ## Status (2026-11-15)
@@ -213,10 +213,11 @@ New: `api/src/lib/advent.ts` (pure state + open logic) and
 | `POST /advent/rewards/:code/redeem` | API key / owner | `available` → `redeemed`, with `redeemedBy` and an optional `ticketRef`. Idempotent; 409 if expired, already redeemed, or not a coupon. |
 | `GET /advent/summary` | owner | Opens per door, redemptions per door, eligible customers. |
 
-`double_stamps` hook: in the stamp-add path (`routes/cards.ts` / transactions),
-after a `stamp_add` commits, add one `'bonus'` transaction titled
-"Sello doble de Adviento" if the customer has a valid `double_stamps` reward.
-Both writes go in the same transaction.
+`double_stamps`: Stampee doesn't know the service of a visit, the CRM does. The CRM's nightly
+sync calls `POST /advent/double-stamps` once per completed January visit of semipermanente
+or above; Stampee checks the reward and its dates and adds one `'bonus'` stamp
+("Sello doble de Adviento"), idempotent on the visit (`advent_double_stamps`). The CRM
+counts `bonus` stamps as gifted, so its absolute stamp count keeps them.
 
 Tests (`api/test/advent.test.ts`, with a fake clock): unlocks at 06:59 vs 07:00
 Bogota; no content leaks before opening; idempotent double POST; flash closes;

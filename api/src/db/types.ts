@@ -290,6 +290,65 @@ export interface GiftCardEventsTable {
   created_at: Generated<Date>;
 }
 
+// ---------------- Advent calendar (0020) ----------------
+
+export type AdventRewardKind = 'coupon' | 'bonus_stamps' | 'double_stamps' | 'link' | 'gift_card';
+
+export interface AdventCalendarsTable {
+  id: ColumnType<string, string | undefined, string>;
+  owner_id: string;
+  year: number;
+  enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  opens_until: ColumnType<Date, Date | string, Date | string>;
+  common_terms: ColumnType<string[], string | undefined, string>;
+  created_at: Generated<Date>;
+}
+
+export interface AdventDoorsTable {
+  id: ColumnType<string, string | undefined, string>;
+  calendar_id: string;
+  door_no: number;
+  day_label: number;
+  unlock_at: ColumnType<Date, Date | string, Date | string>;
+  flash_until: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  kind: AdventRewardKind;
+  title: string;
+  subtitle: ColumnType<string, string | undefined, string>;
+  terms: ColumnType<string[], string | undefined, string>;
+  value_cop: ColumnType<number | null, number | null | undefined, number | null>;
+  stamps: ColumnType<number | null, number | null | undefined, number | null>;
+  url: ColumnType<string | null, string | null | undefined, string | null>;
+  valid_from: ColumnType<string | null, string | null | undefined, string | null>;
+  valid_to: ColumnType<string | null, string | null | undefined, string | null>;
+  config: ColumnType<Record<string, unknown>, string | undefined, string>;
+}
+
+export interface AdventRewardsTable {
+  id: ColumnType<string, string | undefined, string>;
+  owner_id: string;
+  door_id: string;
+  customer_id: string;
+  card_id: ColumnType<string | null, string | null | undefined, string | null>;
+  opened_at: Generated<Date>;
+  code: ColumnType<string | null, string | null | undefined, string | null>;
+  status: ColumnType<'available' | 'redeemed' | 'transferred', 'available' | 'redeemed' | 'transferred' | undefined, 'available' | 'redeemed' | 'transferred'>;
+  valid_from: ColumnType<string | null, string | null | undefined, string | null>;
+  valid_to: ColumnType<string | null, string | null | undefined, string | null>;
+  stamps: ColumnType<number | null, number | null | undefined, number | null>;
+  redeemed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  redeemed_by: ColumnType<string | null, string | null | undefined, string | null>;
+  ticket_ref: ColumnType<string | null, string | null | undefined, string | null>;
+  external_ref: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+export interface AdventDoubleStampsTable {
+  reward_id: string;
+  visit_ref: string;
+  card_id: ColumnType<string | null, string | null | undefined, string | null>;
+  visit_date: string;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   users: UsersTable;
   profiles: ProfilesTable;
@@ -311,4 +370,8 @@ export interface Database {
   gift_card_tiers: GiftCardTiersTable;
   gift_cards: GiftCardsTable;
   gift_card_events: GiftCardEventsTable;
+  advent_calendars: AdventCalendarsTable;
+  advent_doors: AdventDoorsTable;
+  advent_rewards: AdventRewardsTable;
+  advent_double_stamps: AdventDoubleStampsTable;
 }
