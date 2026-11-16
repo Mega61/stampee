@@ -73,12 +73,15 @@ const Divider = () => (
 );
 
 /** "¿Para quién es este regalo?" — once, then it's fixed. */
-const RecipientForm: React.FC<{ onSave: (name: string) => Promise<void> }> = ({ onSave }) => {
+const RecipientForm: React.FC<{ onSave: (name: string, phone?: string) => Promise<void> }> = ({ onSave }) => {
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmed = name.trim();
-  const valid = trimmed.length >= 2 && trimmed.length <= 40;
+  const phoneDigits = phone.replace(/\D+/g, '');
+  const phoneOk = phoneDigits.length === 0 || phoneDigits.length >= 10;
+  const valid = trimmed.length >= 2 && trimmed.length <= 40 && phoneOk;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,7 +89,7 @@ const RecipientForm: React.FC<{ onSave: (name: string) => Promise<void> }> = ({ 
     setSaving(true);
     setError(null);
     try {
-      await onSave(trimmed);
+      await onSave(trimmed, phoneDigits ? phone.trim() : undefined);
     } catch (err) {
       setError(
         err instanceof ApiError && err.code === 'RECIPIENT_ALREADY_SET'
@@ -122,8 +125,19 @@ const RecipientForm: React.FC<{ onSave: (name: string) => Promise<void> }> = ({ 
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Guardar'}
         </button>
       </div>
+      <input
+        id="gift-recipient-phone"
+        value={phone}
+        onChange={(e) => setPhone(e.target.value.replace(/[^\d+ ]/g, '').slice(0, 16))}
+        placeholder="Su WhatsApp (opcional)"
+        inputMode="tel"
+        autoComplete="off"
+        aria-label="WhatsApp de quien recibe (opcional)"
+        className="w-full rounded-xl border bg-white px-4 py-3 text-[15px] outline-none transition focus:ring-2"
+        style={{ borderColor: phoneOk ? '#E7DAD2' : '#B4312B', color: B.ink, ['--tw-ring-color' as string]: `${B.oro}55` }}
+      />
       <p className="text-xs" style={{ color: error ? '#B4312B' : '#7C706A' }}>
-        {error ?? 'Solo se puede escribir una vez, así que revísalo bien.'}
+        {error ?? 'Con su WhatsApp, la tarjeta también aparece en su tarjeta de puntos. Solo se puede escribir una vez, así que revísalo bien.'}
       </p>
     </form>
   );
@@ -298,9 +312,9 @@ const GiftCardPage: React.FC = () => {
     }
   };
 
-  const saveRecipient = async (name: string) => {
+  const saveRecipient = async (name: string, phone?: string) => {
     if (!slug || !uniqueId) return;
-    const next = await setPublicGiftRecipient(slug, uniqueId, name);
+    const next = await setPublicGiftRecipient(slug, uniqueId, name, phone);
     setGift(next);
   };
 

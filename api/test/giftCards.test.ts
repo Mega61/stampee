@@ -411,23 +411,72 @@ describe('scope', () => {
 });
 
 describe('listGiftCardsForCustomer', () => {
-  it('returns buyer and recipient cards, public-safe, without void ones', async () => {
+  const patch = (url: string, payload: unknown) =>
+    rig.app.inject({ method: 'PATCH', url, payload: payload as Record<string, unknown>, headers: { ...json, ...auth() } });
+  let ip = 0;
+  const named = (uniqueId: string, payload: Record<string, unknown>) =>
+    rig.app.inject({
+      method: 'POST',
+      url: `/public/gift/golden/${uniqueId}/recipient`,
+      payload,
+      headers: json,
+      remoteAddress: `10.9.0.${++ip}`,
+    });
+
+  it('buyer sees every card she gave (redeemed too), never void ones, public-safe', async () => {
     const bought = await order();
     const buyerId = bought.buyerCustomerId as string;
     const voided = await order();
     await post(`/gift-cards/${voided.id}/void`, { reason: 'x' });
-    const received = await order({ buyer: { name: 'Luisa', phone: '3109998877' } });
-    await activate(received.id, { paidAt: lib.bogotaDate() });
-    await redeem(received.code, { customer: { name: 'Ana', phone: '300 111 2233' } });
+    await activate(bought.id, { paidAt: lib.bogotaDate() });
+    await redeem(bought.code, { customer: { name: 'Laura', phone: '3205556677' } });
 
     const list = await lib.listGiftCardsForCustomer(kdb, owner.userId, buyerId);
-    expect(list.map((c) => [c.id, c.role])).toEqual([
-      [received.id, 'recipient'],
-      [bought.id, 'buyer'],
-    ]);
-    expect(list[0]!.publicUrl).toBe(received.publicUrl);
+    expect(list.map((c) => [c.id, c.role, c.locked, c.effectiveStatus])).toEqual([[bought.id, 'buyer', false, 'redeemed']]);
+    expect(list[0]!.publicUrl).toBe(bought.publicUrl);
     expect(JSON.stringify(list)).not.toMatch(/phone|CustomerId|paidRef/i);
     expect(await lib.listGiftCardsForCustomer(kdb, owner.userId, 'nobody')).toEqual([]);
   });
-});
 
+  it('a phone typed on the gift page shows the card LOCKED (no code/link) and never links or creates customers', async () => {
+    const laura = await insertCustomer(db.pool, owner.userId, { name: 'Laura', mobile: '+57 320 555 6677' });
+    const gift = await order();
+    await activate(gift.id, { paidAt: lib.bogotaDate() });
+    const res = await named(gift.uniqueId, { name: 'Laura', phone: '320 555 6677' });
+    expect(res.statusCode, res.body).toBe(200);
+    const row = (await get(`/gift-cards/${gift.id}`)).json().data;
+    expect(row.recipientCustomerId).toBeNull();
+    expect(row.recipientPhone).toBe('320 555 6677');
+
+    const [item] = await lib.listGiftCardsForCustomer(kdb, owner.userId, laura);
+    expect(item).toMatchObject({ id: gift.id, role: 'recipient', locked: true, code: null, uniqueId: null, publicUrl: null, amountCop: 50000 });
+    expect(JSON.stringify(item)).not.toContain(gift.code);
+    expect(JSON.stringify(item)).not.toContain(gift.uniqueId);
+
+    // A phone with no customer behind it creates nobody.
+    const other = await order();
+    await named(other.uniqueId, { name: 'Sofi', phone: '3001234000' });
+    const count = await db.pool.query(`select count(*)::int as n from loyalty.customers where right(regexp_replace(mobile,'[^0-9]','','g'),10) = '3001234000'`);
+    expect(count.rows[0].n).toBe(0);
+  });
+
+  it('staff confirmation (admin edit or redemption) unlocks it; redeemed cards drop off the recipient list', async () => {
+    const laura = await insertCustomer(db.pool, owner.userId, { name: 'Laura', mobile: '3205556677' });
+    const gift = await order();
+    await activate(gift.id, { paidAt: lib.bogotaDate() });
+    await named(gift.uniqueId, { name: 'Laura', phone: '3205550000' }); // mistyped
+    expect(await lib.listGiftCardsForCustomer(kdb, owner.userId, laura)).toEqual([]);
+
+    expect((await patch(`/gift-cards/${gift.id}`, { recipientPhone: '320 555 6677' })).statusCode).toBe(200);
+    const [item] = await lib.listGiftCardsForCustomer(kdb, owner.userId, laura);
+    expect(item).toMatchObject({ role: 'recipient', locked: false, code: gift.code, publicUrl: gift.publicUrl });
+
+    await redeem(gift.code, { customer: { name: 'Laura', phone: '3205556677' } });
+    expect(await lib.listGiftCardsForCustomer(kdb, owner.userId, laura)).toEqual([]);
+  });
+
+  it('rejects a short recipient phone', async () => {
+    const gift = await order();
+    expect((await named(gift.uniqueId, { name: 'Laura', phone: '320 55' })).statusCode).toBe(400);
+  });
+});

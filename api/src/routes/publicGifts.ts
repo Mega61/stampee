@@ -127,7 +127,7 @@ export const publicGiftRoutes: FastifyPluginAsync = async (app) => {
     async (req) => {
       const body = parseBody(PublicRecipientBody, req.body);
       const owner = await findOwner(req.params.slug);
-      const card = await setRecipientOnce(db, owner.id, req.params.uniqueId, body.name);
+      const card = await setRecipientOnce(db, owner.id, req.params.uniqueId, body.name, body.phone);
       return { ok: true, data: await toPublicGift(card, owner) };
     },
   );

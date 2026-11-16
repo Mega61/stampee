@@ -109,6 +109,21 @@ export const logGiftEvent = async (
   await db.insertInto('gift_card_events').values({ gift_card_id: giftCardId, type, data, actor_name: actorName }).execute();
 };
 
+/** The owner's existing customer for a phone (last 10 digits), never creates one. */
+export const findCustomerByPhone = async (db: Executor, ownerId: string, phone: string): Promise<string | null> => {
+  const key = phoneKey(phone);
+  if (key.length < 10) return null;
+  const row = await db
+    .selectFrom('customers')
+    .select('id')
+    .where('owner_id', '=', ownerId)
+    .where(sqlPhoneKey('mobile'), '=', key)
+    .orderBy('created_at', 'asc')
+    .limit(1)
+    .executeTakeFirst();
+  return row?.id ?? null;
+};
+
 /**
  * Find the owner's customer by phone (last 10 digits) or create one. Returns
  * null when the phone has too few digits to be a real number.
@@ -523,7 +538,13 @@ export const updateGiftCard = async (
     const set: Record<string, unknown> = {};
     const changes: Record<string, unknown> = {};
     if (input.recipientName !== undefined) set['recipient_name'] = input.recipientName?.trim() || null;
-    if (input.recipientPhone !== undefined) set['recipient_phone'] = input.recipientPhone?.trim() || null;
+    if (input.recipientPhone !== undefined) {
+      set['recipient_phone'] = input.recipientPhone?.trim() || null;
+      // Re-attach to the matching customer, unless redemption already linked the real one.
+      if (row.status !== 'redeemed') {
+        set['recipient_customer_id'] = input.recipientPhone ? await findCustomerByPhone(trx, ownerId, input.recipientPhone) : null;
+      }
+    }
     if (input.message !== undefined) set['message'] = input.message.trim();
     if (input.validTo !== undefined) {
       if (row.valid_from && input.validTo < row.valid_from) {
@@ -547,7 +568,19 @@ export const updateGiftCard = async (
   });
 
 /** Public: the link holder names the recipient once (pending or active cards only). */
-export const setRecipientOnce = async (db: Executor, ownerId: string, uniqueId: string, name: string): Promise<GiftCardRow> =>
+/**
+ * The link holder names the recipient once, optionally with her WhatsApp. The
+ * phone is an unverified claim, so it never sets recipient_customer_id (that
+ * means "confirmed by staff": admin edit or redemption) and never creates a
+ * customer. listGiftCardsForCustomer matches it by phone, but redacted.
+ */
+export const setRecipientOnce = async (
+  db: Executor,
+  ownerId: string,
+  uniqueId: string,
+  name: string,
+  phone?: string | null,
+): Promise<GiftCardRow> =>
   inTransaction(db, async (trx) => {
     const row = (await trx
       .selectFrom('gift_cards')
@@ -564,11 +597,14 @@ export const setRecipientOnce = async (db: Executor, ownerId: string, uniqueId: 
     if (effectiveStatus(row) === 'expired') throw new AppError(409, 'NOT_EDITABLE', 'Gift card expired.');
     const card = (await trx
       .updateTable('gift_cards')
-      .set({ recipient_name: name })
+      .set({
+        recipient_name: name,
+        ...(phone ? { recipient_phone: phone.trim() } : {}),
+      })
       .where('id', '=', row.id)
       .returningAll()
       .executeTakeFirstOrThrow()) as GiftCardRow;
-    await logGiftEvent(trx, card.id, 'recipient_set', { name, via: 'public' }, null);
+    await logGiftEvent(trx, card.id, 'recipient_set', { name, withPhone: Boolean(phone), via: 'public' }, null);
     return card;
   });
 
@@ -661,30 +697,82 @@ export const toPublicGiftCardDto = (r: GiftCardRow, publicBase: string | null, t
   publicUrl: publicBase ? `${publicBase}/${r.unique_id}` : null,
 });
 
-export type CustomerGiftCard = ReturnType<typeof toPublicGiftCardDto> & { role: 'buyer' | 'recipient' };
+type PublicGiftCardDto = ReturnType<typeof toPublicGiftCardDto>;
 
 /**
- * A customer's gift cards (as buyer or as recipient), void excluded, newest
- * first. When the same customer is both, the role is 'buyer'.
+ * An item of "Mis regalos". `locked` = matched only by the phone typed on the
+ * gift page (unconfirmed): a gift card is a bearer instrument, so the code, the
+ * link token and the link are withheld until staff confirm the recipient.
+ */
+export type CustomerGiftCard =
+  | (PublicGiftCardDto & { role: 'buyer' | 'recipient'; locked: false })
+  | (Omit<PublicGiftCardDto, 'code' | 'uniqueId' | 'publicUrl'> & {
+      code: null;
+      uniqueId: null;
+      publicUrl: null;
+      role: 'recipient';
+      locked: true;
+      lockedHint: string;
+    });
+
+/**
+ * A customer's gift cards for her "Mis regalos" (the advent back of the card).
+ *
+ * - As buyer/giver: every card she gave, any status, so she sees "Disfrutada por
+ *   Laura".
+ * - As recipient: cards still to use (pending or active, expired included so she
+ *   knows). Redeemed ones drop off. Confirmed when staff linked the card to her
+ *   (recipient_customer_id: admin edit or redemption). While it isn't linked to
+ *   anyone, a match on the phone typed on the gift page shows it LOCKED: no code,
+ *   no link, just amount/status/giver/validity and how to open it.
+ *
+ * Void cards never show. When she's both, the role is 'buyer'. Newest first.
  */
 export const listGiftCardsForCustomer = async (
   db: Executor,
   ownerId: string,
   customerId: string,
 ): Promise<CustomerGiftCard[]> => {
+  const customer = await db
+    .selectFrom('customers')
+    .select('mobile')
+    .where('id', '=', customerId)
+    .where('owner_id', '=', ownerId)
+    .executeTakeFirst();
+  if (!customer) return [];
+  const key = phoneKey(customer.mobile ?? '');
   const rows = (await db
     .selectFrom('gift_cards')
     .selectAll()
     .where('owner_id', '=', ownerId)
     .where('status', '!=', 'void')
-    .where((eb) => eb.or([eb('buyer_customer_id', '=', customerId), eb('recipient_customer_id', '=', customerId)]))
+    .where((eb) => {
+      const asRecipient = [eb('recipient_customer_id', '=', customerId)];
+      if (key.length === 10) {
+        asRecipient.push(eb.and([eb('recipient_customer_id', 'is', null), eb(sqlPhoneKey('recipient_phone'), '=', key)]));
+      }
+      return eb.or([
+        eb('buyer_customer_id', '=', customerId),
+        eb.and([eb('status', '!=', 'redeemed'), eb.or(asRecipient)]),
+      ]);
+    })
     .orderBy('created_at', 'desc')
     .execute()) as GiftCardRow[];
   if (rows.length === 0) return [];
   const base = publicBaseFor(await ownerSlug(db, ownerId));
   const today = bogotaDate();
-  return rows.map((r) => ({
-    ...toPublicGiftCardDto(r, base, today),
-    role: r.buyer_customer_id === customerId ? ('buyer' as const) : ('recipient' as const),
-  }));
+  return rows.map((r): CustomerGiftCard => {
+    const dto = toPublicGiftCardDto(r, base, today);
+    if (r.buyer_customer_id === customerId) return { ...dto, role: 'buyer', locked: false };
+    if (r.recipient_customer_id === customerId) return { ...dto, role: 'recipient', locked: false };
+    return {
+      ...dto,
+      code: null,
+      uniqueId: null,
+      publicUrl: null,
+      role: 'recipient',
+      locked: true,
+      lockedHint: 'Ábrela con el link que te llegó por WhatsApp.',
+    };
+  });
 };

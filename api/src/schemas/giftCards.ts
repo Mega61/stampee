@@ -93,4 +93,11 @@ export const UnredeemGiftCardBody = z.object({
 
 export const PublicRecipientBody = z.object({
   name: z.string().trim().min(2, 'El nombre debe tener al menos 2 letras.').max(40, 'Máximo 40 caracteres.'),
+  phone: z
+    .string()
+    .trim()
+    .max(20)
+    .refine((v) => v === '' || v.replace(/\D+/g, '').length >= 10, 'El WhatsApp debe tener 10 dígitos.')
+    .optional()
+    .transform((v) => (v ? v : null)),
 });

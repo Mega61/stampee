@@ -168,8 +168,11 @@ export async function fetchPublicGift(slug: string, uniqueId: string): Promise<P
   }
 }
 
-export const setPublicGiftRecipient = (slug: string, uniqueId: string, name: string) =>
-  api.post<PublicGift>(`/public/gift/${encodeURIComponent(slug)}/${encodeURIComponent(uniqueId)}/recipient`, { name });
+export const setPublicGiftRecipient = (slug: string, uniqueId: string, name: string, phone?: string) =>
+  api.post<PublicGift>(`/public/gift/${encodeURIComponent(slug)}/${encodeURIComponent(uniqueId)}/recipient`, {
+    name,
+    ...(phone ? { phone } : {}),
+  });
 
 // ---- formatting (shared by the public page and the admin)
 

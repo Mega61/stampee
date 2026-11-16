@@ -33,6 +33,22 @@ pending_payment ──activate──▶ active ──redeem──▶ redeemed
   idempotent on `externalRef`, and `listGiftCardsForCustomer(db, ownerId,
   customerId)`.
 
+## Gift cards and the customer's permanent link
+
+- The gift card keeps its own link (`/:slug/regalo/:uniqueId`) forever. It never
+  redirects to, or reveals, anyone's loyalty card.
+- The gift page can take the recipient's WhatsApp (optional, once). It is an
+  unverified claim, so it never sets `recipient_customer_id` and never creates a
+  customer. `recipient_customer_id` means "confirmed by staff": an admin edit of
+  the recipient phone, or redemption in the panel.
+- `listGiftCardsForCustomer` ("Mis regalos" on the permanent link):
+  - buyer/giver: every card she gave, any status (shows "Disfrutada por …");
+  - recipient, confirmed: cards still to use, with code and link;
+  - recipient matched only by the typed phone: `locked: true`, no `code`,
+    `uniqueId` or `publicUrl` (gift cards are bearer instruments), plus
+    `lockedHint`;
+  - redeemed cards drop off the recipient's list; void cards never show.
+
 ## Seeding the tiers
 
 Tiers are per business. Create them once, either from the admin page
