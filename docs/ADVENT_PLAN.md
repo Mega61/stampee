@@ -309,10 +309,44 @@ reuses it so the website and the card look like the same studio:
   the approved prototype (string lights, wrapped door 24, sprigs) stay as the
   base layer, as the landing does with its CSS baubles under the video. With
   reduced motion, poster frames only and no falling leaves.
-- **Coordination:** reuse the landing session's Polyfork model ids, raea
-  compositions and material palette instead of re-modelling, so both renders
-  match light for light. The raea sources and models go in the private workspace
-  (`marketing/`), only the rendered files in this repo.
+- **Sources (from the landing's Navidad session, 2026-11-15).** These live in
+  the private raea workspace `~/Studio/golden-beauty` (a git repo), project
+  `projects/navidad-ornamentos`. Only rendered files enter this repo.
+  - **Models** in `media/`, already repainted with named parts:
+    - `ornament.glb` (Polyfork giant-lawn-ornament-ball-a92ef6);
+    - `snowman.glb` (snowman-18c02d);
+    - `tree.glb` (front-yard-fir-tree-0a278d; its top star is the star asset);
+    - `presents.glb` (wrapped-present-pile-b2ddd9);
+    - for the opening box: `present.glb` / Polyfork big-wrapped-present-57b639.
+      First check that its lid is a separate node. If not, split it with
+      `tools/kitbash.py`.
+  - **Palette** (material overrides, as in `iconos.tsx`):
+    - GOLD #d9a54e (metallic 1, roughness .28);
+    - GOLD_DEEP #a87a2c (1, .35);
+    - PEARL #f6efe3 (0, .45);
+    - MOKA #4a3426 (.2, .3);
+    - bauble loop: shell #e7aa51 (1, .18), trim #ffd49f.
+    - The card adds wine #9c3a33 for ribbons only.
+  - **Light and camera:**
+    - Environment `media/studio-soft.hdr`. Use the blurred one: the raw HDR
+      speckles matte surfaces.
+    - DirectionalLight #ffe3b8 at 5200 lx with **no shadows** (they cause acne),
+      PointLight #ffcf8a, DepthOfField f/2.4.
+    - Still icons use fov 28° (`iconos.tsx`). Loops: 30 fps, every motion on
+      whole cycles of `t = f/N` so they loop with no seam (`ornamentos.tsx`,
+      rig in `Hanging()`).
+  - **Alpha:** `raea --alpha` does not keep 3D transparent. Render once on #000
+    and once on #fff, then `sh tools/matte.sh NAME` (difference matte +
+    unpremultiply), then `magick -trim`, then animated WebP.
+  - **Video fallback:** render PNG frames (`-o dir/`) and encode with ffmpeg
+    (x264 crf 19 `aq-mode=3` + `noise=alls=3:allf=t`, or vp9 crf 30 aq-mode 2).
+    openh264 bands in dark moka.
+- **Shared code:** the landing keeps `<GoldLeaf fixed? />` and `goldBurst(x, y)`
+  stable (`code/landing/src/app/[lang]/_components/season/`, newest in commit
+  6b0b88f on `feat/navidad`). Port them from there. `goldBurst` makes its own
+  fixed canvas and removes it after about 2.2 s; the caller checks
+  `prefers-reduced-motion`. The snowman, tree and presents alpha WebPs in the
+  landing's `public/navidad/` are reused as-is.
 
 ## 6. Panel (golden-beauty-studio-landing, `admin/`)
 
