@@ -15,6 +15,45 @@ the code stays generic. This plan only fixes the *kinds* of gift.
 Planned. Branch `feat/calendario-adviento`. Depends on `feat/tarjetas-regalo`
 (gift cards) for the last door only. See §7.
 
+## 0. Foundation: one permanent link per customer
+
+Today the public link is `/:slug/<issued_cards.unique_id>`: **one link per
+card**. A new card (a win-back campaign, or the card after a redeemed one)
+means a new link that has to be sent again. On 2026-11-15, 51 of 115
+customers already hold 2 cards, so 2 links. The advent calendar, gifts and
+gift cards belong to the **customer**, not to a campaign. So before the
+calendar:
+
+- **Migration `0018_customer_link.sql`:** `customers.public_id uuid unique not null`.
+  Backfill: `public_id` = the `unique_id` of the customer's **oldest** card. The link
+  most clients already have becomes their permanent link, and nobody needs a new
+  message. A customer without cards gets a fresh uuid.
+- **Resolution:** `GET /public/cards/:slug/:id` (same URL shape) checks
+  `customers.public_id` first. If `:id` is a card `unique_id` instead, it
+  resolves to that card's customer and answers with `canonicalId`, and the SPA
+  rewrites the URL (`history.replaceState`). **Every link ever sent keeps
+  working**, and all of them converge on one.
+- **What the page shows:** the customer's **current card** = newest `Active`
+  card (the same rule the CRM uses to stamp). If there is none, the newest
+  card. Other cards (older, redeemed) show under "Historial". The back face
+  (seasonal calendar, "Mis regalos": advent gifts, gift cards, win-back gifts)
+  is keyed to the customer, so it survives any campaign change.
+- **Customer-level, not card-level:** advent rewards (§3 already keys on
+  `customer_id`), the "unopened gift" badge, view beacons (`card_views` keeps
+  `card_id` and adds `customer_id`).
+- **Staff scan / QR:** keeps working per card. A customer QR resolves to the
+  current card.
+- **Wallet passes** (`wallet_passes`, Apple serial = card `unique_id`) stay
+  per card for December. Moving them to the customer is a follow-up: a new card
+  should update the same pass instead of needing a new one.
+- **API keys / CRM:** `GET /customers` returns `publicId`, and the CRM stores
+  `stampee_public_id` next to `stampee_card_unique_id`.
+- **Panel:** `cardUrl()` uses `publicId`. `stampee_card_share` (one row per
+  card) becomes "link sent to this customer", so a new card no longer asks to be
+  re-sent.
+- **Before backfill:** check for duplicate customers (same `mobile`) and merge
+  them, or a person keeps two permanent links.
+
 ## 1. Decisions
 
 | # | Decision |
@@ -39,7 +78,7 @@ Planned. Branch `feat/calendario-adviento`. Depends on `feat/tarjetas-regalo`
 | `link` | Creates a reward that holds a URL (e.g. `/regalar?ref=adviento`). | Not redeemed; it's a call to action. |
 | `gift_card` | Calls `issueGiftCard(trx, …)` (gift-card branch) and stores the result in `external_ref`. | By the gift-card flow (its own code `TR-…`, transfer, panel). |
 
-## 3. Data — migration `0018_advent.sql`
+## 3. Data — migration `0020_advent.sql`
 
 ```sql
 set search_path = loyalty, public;
@@ -99,8 +138,8 @@ New: `api/src/lib/advent.ts` (pure state + open logic) and
 
 | Route | Auth | Notes |
 |---|---|---|
-| `GET /public/cards/:slug/:uniqueId/advent` | public, 60/min | `{ serverNow, calendar: { year, eligible }, doors: [{ no, dayLabel, unlockAt, flashUntil, state: locked\|ready\|opened\|missed, reward? }], rewards: [...] }`. A locked or ready door carries no title or value. 404 if no calendar is enabled. |
-| `POST /public/cards/:slug/:uniqueId/advent/doors/:no/open` | public, 10/min | One transaction: lock the customer's card row `FOR UPDATE`, check decisions 2/4/5, insert the reward (`on conflict do nothing` + reselect), apply the kind side effect. `409 { reason: NOT_YET \| CLOSED \| NOT_ELIGIBLE }`. |
+| `GET /public/cards/:slug/:id/advent` (`:id` = customer `publicId` or any of its card ids) | public, 60/min | `{ serverNow, calendar: { year, eligible }, doors: [{ no, dayLabel, unlockAt, flashUntil, state: locked\|ready\|opened\|missed, reward? }], rewards: [...] }`. A locked or ready door carries no title or value. 404 if no calendar is enabled. |
+| `POST /public/cards/:slug/:id/advent/doors/:no/open` | public, 10/min | One transaction: lock the customer's card row `FOR UPDATE`, check decisions 2/4/5, insert the reward (`on conflict do nothing` + reselect), apply the kind side effect. `409 { reason: NOT_YET \| CLOSED \| NOT_ELIGIBLE }`. |
 | `GET /customers/:id/advent/rewards` | API key / owner | For the panel: the customer's rewards with door title, value, code, status and validity. |
 | `POST /advent/rewards/:code/redeem` | API key / owner | `available` → `redeemed`, with `redeemedBy` and an optional `ticketRef`. Idempotent; 409 if expired, already redeemed, or not a coupon. |
 | `GET /advent/summary` | owner | Opens per door, redemptions per door, eligible customers. |
@@ -191,8 +230,8 @@ MVP, ready before the first coupon door (the first door is a stamp):
 
 ## 7. Coordination with `feat/tarjetas-regalo`
 
-- Migrations: `0018_advent.sql` is this branch's; `0019_gift_cards.sql` belongs
-  to gift cards. The runner tracks files by name, so merge order doesn't
+- Migrations: `0018_customer_link.sql` and `0020_advent.sql` are this branch's;
+  `0019_gift_cards.sql` belongs to gift cards. The runner tracks files by name, so merge order doesn't
   matter. Panel migration 033 is theirs; 034 is ours if needed.
 - The gift_card door calls
   `issueGiftCard(trx, { ownerId, buyerCustomerId: <holder>, amountCop, source: 'advent', funded: false, validFrom, validTo, minTicketCop, transferable: true, rules: { recipient: 'new_or_dormant', giverStampOnRedeem: true }, externalRef: 'advent-<year>:door-<no>:<customerId>' })`.
@@ -215,7 +254,8 @@ Today 2026-11-15. The first door unlocks Wed 2026-12-02 07:00.
 | Wave | Dates | Work | Done when |
 |---|---|---|---|
 | D | Nov 16–17 | **Visual design first.** Interactive prototype of every screen and state: front with "voltea" chip and unopened badge, flip, door board (all door states + countdown), opening sequence, last door with gift card, "Mis regalos", "Mostrar en caja", locked calendar, reduced motion. Built at 390 px with the brand kit. | **The user and the owner approve the look.** No frontend wave (1b, 2a) starts before this; backend (0, 1a) may run in parallel. |
-| 0 | Nov 16 | Migration 0018, `db/types.ts`, shared types in `types.ts`, `GiftCardIssuer` interface, API contract (zod schemas), `/dev/advent` mock data | Typecheck green; this doc updated with anything that changed |
+| L | Nov 16–18 | **Permanent customer link** (§0): migration 0018 + backfill, link resolution, current-card rule, CRM + panel use `publicId`. Ships on its own PR before the calendar. | Every old link opens the same page; a redeemed → new card keeps the URL |
+| 0 | Nov 18 | Migration 0020, `db/types.ts`, shared types in `types.ts`, `GiftCardIssuer` interface, API contract (zod schemas), `/dev/advent` mock data | Typecheck green; this doc updated with anything that changed |
 | 1a | Nov 16–19 | **Backend:** `lib/advent.ts`, routes, double-stamp hook, seed script, tests | `api npm test` green |
 | 1b | Nov 16–20 | **Flip:** `CardFlip` + gesture arbitration + affordances, on mock data | Works on a real iPhone + Android; vertical Historial swipe and stamp taps unaffected |
 | 2a | Nov 20–25 | **Board + opening animation + Mis regalos** | Reviewed on `/dev/advent` at 390 px; reduced-motion path; `card-visual-qa.mjs` |
