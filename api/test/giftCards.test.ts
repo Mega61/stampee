@@ -203,6 +203,22 @@ describe('activate', () => {
     const { rows: after } = await db.pool.query(`select stamps from loyalty.issued_cards where id = $1`, [cardId]);
     expect(after[0].stamps).toBe(1);
   });
+
+  it('buyerStamps gives N stamps, still never completing the card', async () => {
+    const campaignId = await insertCampaign(db.pool, owner.userId, { name: 'Club', totalStamps: 3 });
+    const buyer = await insertCustomer(db.pool, owner.userId, { name: 'Ana', mobile: '3001112233' });
+    const cardId = (await post('/cards', { customerId: buyer, campaignId })).json().data.id;
+    const gift = await order({ rules: { buyerStampOnPaid: true, buyerStamps: 2, ref: 'adviento' } });
+    expect((await activate(gift.id)).statusCode).toBe(200);
+    const { rows } = await db.pool.query(`select stamps from loyalty.issued_cards where id = $1`, [cardId]);
+    expect(rows[0].stamps).toBe(2);
+    // A second +2 on a 3-stamp card stops at total-1.
+    const again = await order({ rules: { buyerStampOnPaid: true, buyerStamps: 2 } });
+    await activate(again.id, { paidRef: 'bono:y' });
+    const { rows: capped } = await db.pool.query(`select stamps from loyalty.issued_cards where id = $1`, [cardId]);
+    expect(capped[0].stamps).toBe(2);
+    expect((await order({ rules: { buyerStamps: 9 } }).catch(() => null))).toBeNull();
+  });
 });
 
 describe('redeem / unredeem', () => {
