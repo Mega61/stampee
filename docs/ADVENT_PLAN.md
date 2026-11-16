@@ -17,42 +17,101 @@ Planned. Branch `feat/calendario-adviento`. Depends on `feat/tarjetas-regalo`
 
 ## 0. Foundation: one permanent link per customer
 
-Today the public link is `/:slug/<issued_cards.unique_id>`: **one link per
-card**. A new card (a win-back campaign, or the card after a redeemed one)
-means a new link that has to be sent again. On 2026-11-15, 51 of 115
-customers already hold 2 cards, so 2 links. The advent calendar, gifts and
-gift cards belong to the **customer**, not to a campaign. So before the
-calendar:
+### 0.1 The problem
+The public link today is `/:slug/<issued_cards.unique_id>`: **one link per
+card**. Each new card means a new link that has to be sent again:
+- a win-back campaign issues a second card;
+- a redeemed card is followed by a fresh one;
+- a new campaign issues another card.
 
-- **Migration `0018_customer_link.sql`:** `customers.public_id uuid unique not null`.
-  Backfill: `public_id` = the `unique_id` of the customer's **oldest** card. The link
-  most clients already have becomes their permanent link, and nobody needs a new
-  message. A customer without cards gets a fresh uuid.
-- **Resolution:** `GET /public/cards/:slug/:id` (same URL shape) checks
-  `customers.public_id` first. If `:id` is a card `unique_id` instead, it
-  resolves to that card's customer and answers with `canonicalId`, and the SPA
-  rewrites the URL (`history.replaceState`). **Every link ever sent keeps
-  working**, and all of them converge on one.
-- **What the page shows:** the customer's **current card** = newest `Active`
-  card (the same rule the CRM uses to stamp). If there is none, the newest
-  card. Other cards (older, redeemed) show under "Historial". The back face
-  (seasonal calendar, "Mis regalos": advent gifts, gift cards, win-back gifts)
-  is keyed to the customer, so it survives any campaign change.
-- **Customer-level, not card-level:** advent rewards (§3 already keys on
-  `customer_id`), the "unopened gift" badge, view beacons (`card_views` keeps
-  `card_id` and adds `customer_id`).
-- **Staff scan / QR:** keeps working per card. A customer QR resolves to the
-  current card.
-- **Wallet passes** (`wallet_passes`, Apple serial = card `unique_id`) stay
-  per card for December. Moving them to the customer is a follow-up: a new card
-  should update the same pass instead of needing a new one.
-- **API keys / CRM:** `GET /customers` returns `publicId`, and the CRM stores
-  `stampee_public_id` next to `stampee_card_unique_id`.
-- **Panel:** `cardUrl()` uses `publicId`. `stampee_card_share` (one row per
-  card) becomes "link sent to this customer", so a new card no longer asks to be
-  re-sent.
-- **Before backfill:** check for duplicate customers (same `mobile`) and merge
-  them, or a person keeps two permanent links.
+The old link still opens, but it shows the old card. On 2026-11-15, 51 of 115
+customers already hold 2 cards, so 2 links. The calendar, gifts and gift cards
+belong to the **customer**, not to a campaign, so they need a link that never
+changes.
+
+### 0.2 The rule
+**One customer = one permanent link: `/:slug/<customers.public_id>`.** The
+link never changes, whatever campaigns or cards come and go. Every link sent
+in the past keeps working and lands on the same page.
+
+### 0.3 Data — migration `0018_customer_link.sql`
+```sql
+alter table loyalty.customers add column public_id uuid;
+-- backfill: the link most clients already have (their first card) becomes the permanent one
+update loyalty.customers c set public_id = (
+  select ic.unique_id from loyalty.issued_cards ic
+  where ic.customer_id = c.id order by ic.created_at asc, ic.id asc limit 1);
+update loyalty.customers set public_id = gen_random_uuid() where public_id is null;
+alter table loyalty.customers alter column public_id set not null,
+  alter column public_id set default gen_random_uuid();
+create unique index customers_public_id_idx on loyalty.customers(public_id);
+alter table loyalty.card_views add column customer_id text references loyalty.customers(id) on delete cascade;
+```
+A `public_id` can equal one of the customer's own card `unique_id`s, by
+design. It can never equal another customer's card id, because card ids are
+globally unique uuids.
+
+### 0.4 Resolving a link
+`GET /public/cards/:slug/:id` (same URL shape, no new route):
+1. Resolve the owner by `slug`.
+2. Look for `customers.public_id = :id` (owner-scoped). If found, that's the
+   customer.
+3. Otherwise look for `issued_cards.unique_id = :id` (owner-scoped). If found,
+   that card's `customer_id` is the customer. The response carries
+   `canonicalId = customer.public_id`, and the SPA does
+   `history.replaceState` to `/:slug/<canonicalId>`. The client never sees an
+   error, and her bookmark converges.
+4. Otherwise, 404 (same message as today).
+
+The response is **customer-shaped**: `{ canonicalId, customer: { name },
+currentCard, otherCards[], advent?, giftCards[] }`. `currentCard` keeps the
+exact shape of today's card payload, so `PublicCardView` renders it unchanged.
+
+### 0.5 Which card the page shows
+`currentCard` = the newest `Active` card by `created_at`. This is the same
+rule the CRM uses to decide which card gets the stamp (`planStamps`), so the
+card on screen is always the card that moves. If she has no active card, it's
+the newest card (a redeemed card still shows its reward state).
+`otherCards` (older or redeemed) appear under "Historial" as compact rows.
+Opening one shows it read-only.
+
+### 0.6 What hangs off the customer, not the card
+- The back face: the seasonal calendar (`advent_rewards.customer_id`) and
+  "Mis regalos".
+- Gift cards where she is buyer or recipient (`listGiftCardsForCustomer` from
+  the gift-card branch).
+- The "unopened gift" badge, and view beacons (`card_views.customer_id`).
+- **These stay per card:** stamps, rewards, the weekly scratch game (its rules
+  read the card's campaign), and staff scan `/:slug/scan/:uniqueId`. A QR built
+  from a `public_id` resolves to `currentCard`.
+- **Wallet passes** stay per card for December (Apple serial = card
+  `unique_id`). Follow-up: one pass per customer that follows `currentCard`, so
+  a new card updates the same pass.
+
+### 0.7 API, CRM and panel
+- API-key `GET /customers` and `GET /customers/:id` return `publicId`.
+  `POST /cards` returns the customer's `publicId` as well, so the CRM never
+  needs a second call.
+- CRM: store `stampee_public_id` on the client, next to
+  `stampee_card_unique_id`.
+- Panel: `cardUrl()` (`lib/stampee/card-share.ts`) builds the link from
+  `publicId`. `stampee_card_share` is still keyed by card, but "pending to send"
+  becomes "this **customer** has never been sent her link". A second card no
+  longer asks to be re-sent.
+
+### 0.8 Rollout and edge cases
+1. **Duplicates first:** list customers that share a normalized `mobile`
+   (prod has 118 customers but 115 with a card). Merge them before the backfill
+   (move cards to the oldest customer row) or the same person keeps two
+   permanent links. A one-off script prints the candidates; the user approves
+   the merges.
+2. Run 0018 and deploy the API (both id kinds resolve), then the SPA
+   (`replaceState`), then the CRM/panel (`publicId`). Each step is
+   backward-compatible.
+3. A customer deleted in Stampee: her link 404s, same as today.
+4. Testing: an old card link and the permanent link render the same page;
+   redeem → a new card keeps the same URL; a win-back card becomes `currentCard`;
+   the other customer's ids never resolve across owners.
 
 ## 1. Decisions
 
@@ -65,6 +124,7 @@ calendar:
 | 5 | Late opening is allowed: an unlocked door stays openable until the calendar's `opens_until` (Dec 31). **Flash** doors close at `flash_until` (48 h). |
 | 6 | Opening is idempotent: one row per (door, customer), and replays return the same gift. |
 | 7 | Gifts are redeemed in the studio's panel, never self-served. Each gift has its own `valid_from`/`valid_to`. |
+| 10 | **Every gift carries its terms and conditions** (`terms`: a list of short lines), plus the calendar's common terms. They are shown in the opening reveal ("Términos y condiciones"), in every "Mis regalos" item (expandable) and on the "Mostrar en caja" screen, so the front desk reads the same rules the client read. |
 | 8 | Bonus-stamp gifts follow the existing rule: **a gift never completes a card** (same guard as `POST /cards/gift-stamps`). |
 | 9 | The back face is a horizontal **flip** (physical card). The existing vertical swipe to "Historial" stays on the front. |
 
@@ -89,6 +149,7 @@ create table loyalty.advent_calendars (
   year int not null,
   enabled boolean not null default false,
   opens_until timestamptz not null,           -- last moment any door can be opened
+  common_terms jsonb not null default '[]',   -- shown under every gift's own terms
   unique (owner_id, year)
 );
 
@@ -102,7 +163,7 @@ create table loyalty.advent_doors (
   kind text not null check (kind in ('coupon','bonus_stamps','double_stamps','link','gift_card')),
   title text not null,
   subtitle text not null default '',
-  terms text not null default '',
+  terms jsonb not null default '[]',          -- list of short lines shown under "Términos y condiciones"
   value_cop int,
   stamps int,                                 -- bonus_stamps
   url text,                                   -- link
