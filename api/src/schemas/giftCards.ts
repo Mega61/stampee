@@ -25,6 +25,7 @@ export const GiftCardRulesSchema = z
     recipient: z.enum(['any', 'new_or_dormant']).optional(),
     giverStampOnRedeem: z.boolean().optional(),
     buyerStampOnPaid: z.boolean().optional(),
+    buyerStamps: z.number().int().min(1).max(5).optional(),
     ref: z.string().trim().max(60).optional(),
   })
   .strict();

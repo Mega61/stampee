@@ -26,6 +26,8 @@ export interface GiftCardRules {
   recipient?: 'any' | 'new_or_dormant';
   giverStampOnRedeem?: boolean;
   buyerStampOnPaid?: boolean;
+  /** How many gift stamps buyerStampOnPaid gives (default 1; the guard still caps at total−1). */
+  buyerStamps?: number;
   ref?: string;
 }
 
@@ -361,6 +363,7 @@ export const activateGiftCard = async (
       buyerStamp = await giftStampToCustomer(trx, {
         ownerId,
         customerId: card.buyer_customer_id,
+        stamps: rulesOf(card).buyerStamps ?? 1,
         remarks: `Tarjeta regalo ${card.code}`,
         actor,
       });

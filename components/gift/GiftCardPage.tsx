@@ -45,7 +45,7 @@ const STATUS_TONE: Record<GiftCardEffectiveStatus, { bg: string; fg: string; dot
   void: { bg: '#FFE9E6', fg: '#922C27', dot: '#E0312E' },
 };
 
-const StatusRibbon: React.FC<{ status: GiftCardEffectiveStatus }> = ({ status }) => {
+const StatusRibbon: React.FC<{ status: GiftCardEffectiveStatus; label?: string }> = ({ status, label }) => {
   const tone = STATUS_TONE[status];
   return (
     <span
@@ -59,7 +59,7 @@ const StatusRibbon: React.FC<{ status: GiftCardEffectiveStatus }> = ({ status })
         )}
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: tone.dot }} />
       </span>
-      {GIFT_STATUS_LABEL[status]}
+      {label ?? GIFT_STATUS_LABEL[status]}
     </span>
   );
 };
@@ -213,7 +213,19 @@ const Terms: React.FC<{ gift: PublicGift }> = ({ gift }) => (
   </ul>
 );
 
+/** Today in Bogotá as YYYY-MM-DD (the API's day boundary). */
+const bogotaToday = () =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+/** Active but its window hasn't opened (e.g. a December promo usable from January). */
+const notYetUsable = (gift: PublicGift) =>
+  gift.effectiveStatus === 'active' && !!gift.validFrom && gift.validFrom.slice(0, 10) > bogotaToday();
+
 const validityLine = (gift: PublicGift) => {
+  if (notYetUsable(gift)) {
+    const long = { day: 'numeric', month: 'long', year: 'numeric' } as const;
+    return `Úsala del ${formatGiftDate(gift.validFrom!, long)} al ${formatGiftDate(gift.validTo!, long)}.`;
+  }
   switch (gift.effectiveStatus) {
     case 'pending_payment':
       return 'Tu tarjeta se activa cuando el estudio confirme el pago. Desde ese día tienes un año para usarla.';
@@ -371,7 +383,7 @@ const GiftCardPage: React.FC = () => {
         {/* Card */}
         <section className="mx-auto w-full max-w-[460px] lg:sticky lg:top-12">
           <div className="mb-5 flex justify-center lg:justify-start">
-            <StatusRibbon status={status} />
+            <StatusRibbon status={status} label={notYetUsable(gift) ? 'Guardada para después' : undefined} />
           </div>
           <div className={`relative ${justOpened ? 'gc-reveal' : ''}`}>
             <GiftCardFace
