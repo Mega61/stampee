@@ -46,6 +46,8 @@ export const summarizeCard = (
   history: TransactionRow[],
   campaign: CampaignInfo | undefined,
   publicBase: string | null,
+  /** The customer's permanent link id (0018); the card id only as a fallback. */
+  linkId?: string,
 ) => {
   const snapshot = card.template_snapshot ?? {};
   // The snapshot is what the customer actually sees on their card.
@@ -96,7 +98,7 @@ export const summarizeCard = (
     lastVisitAt: iso(lastVisitAt),
     lastActivityAt: iso(lastActivityAt) ?? dateOnly(card.last_visit),
     redeemedAt: iso(redeemedAt) ?? dateOnly(card.completed_date),
-    publicUrl: publicBase ? `${publicBase}/${card.unique_id}` : null,
+    publicUrl: publicBase ? `${publicBase}/${linkId ?? card.unique_id}` : null,
   };
 };
 
@@ -143,7 +145,13 @@ const buildSummaries = async (
     const customerCards = cards
       .filter((card) => card.customer_id === customer.id)
       .map((card) =>
-        summarizeCard(card, historyByCard.get(card.id) ?? [], card.campaign_id ? campaignById.get(card.campaign_id) : undefined, publicBase),
+        summarizeCard(
+          card,
+          historyByCard.get(card.id) ?? [],
+          card.campaign_id ? campaignById.get(card.campaign_id) : undefined,
+          publicBase,
+          customer.public_id,
+        ),
       );
     const active = customerCards.filter((c) => c.status === 'Active');
     return {
@@ -152,6 +160,7 @@ const buildSummaries = async (
       email: customer.email || null,
       mobile: customer.mobile,
       status: customer.status,
+      publicId: customer.public_id,
       totals: {
         activeCards: active.length,
         readyToRedeem: active.filter((c) => c.readyToRedeem).length,
