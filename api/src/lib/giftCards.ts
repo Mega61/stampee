@@ -616,3 +616,53 @@ export const toGiftCardDto = (r: GiftCardRow, publicBase: string | null, today: 
 export type GiftCardDto = ReturnType<typeof toGiftCardDto>;
 
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? '';
+
+// ---------------------------------------------------------------- per customer
+
+/** Public-safe card shape (no phones, no customer ids, no payment refs). */
+export const toPublicGiftCardDto = (r: GiftCardRow, publicBase: string | null, today: string = bogotaDate()) => ({
+  id: r.id,
+  uniqueId: r.unique_id,
+  code: r.code,
+  amountCop: r.amount_cop,
+  tierName: r.tier_name,
+  effectiveStatus: effectiveStatus(r, today),
+  funded: r.funded,
+  source: r.source,
+  buyerFirstName: firstName(r.buyer_name),
+  recipientName: r.recipient_name,
+  message: r.message,
+  validFrom: r.valid_from,
+  validTo: r.valid_to,
+  minTicketCop: r.min_ticket_cop,
+  transferable: r.transferable,
+  publicUrl: publicBase ? `${publicBase}/${r.unique_id}` : null,
+});
+
+export type CustomerGiftCard = ReturnType<typeof toPublicGiftCardDto> & { role: 'buyer' | 'recipient' };
+
+/**
+ * A customer's gift cards (as buyer or as recipient), void excluded, newest
+ * first. When the same customer is both, the role is 'buyer'.
+ */
+export const listGiftCardsForCustomer = async (
+  db: Executor,
+  ownerId: string,
+  customerId: string,
+): Promise<CustomerGiftCard[]> => {
+  const rows = (await db
+    .selectFrom('gift_cards')
+    .selectAll()
+    .where('owner_id', '=', ownerId)
+    .where('status', '!=', 'void')
+    .where((eb) => eb.or([eb('buyer_customer_id', '=', customerId), eb('recipient_customer_id', '=', customerId)]))
+    .orderBy('created_at', 'desc')
+    .execute()) as GiftCardRow[];
+  if (rows.length === 0) return [];
+  const base = publicBaseFor(await ownerSlug(db, ownerId));
+  const today = bogotaDate();
+  return rows.map((r) => ({
+    ...toPublicGiftCardDto(r, base, today),
+    role: r.buyer_customer_id === customerId ? ('buyer' as const) : ('recipient' as const),
+  }));
+};

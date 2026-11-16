@@ -325,7 +325,7 @@ export const giftCardRoutes: FastifyPluginAsync = async (app) => {
     if (body.ref) rules.ref = body.ref;
 
     const result = await db.transaction().execute(async (trx) => {
-      const buyerCustomerId = await upsertCustomerByPhone(trx, ownerId, body.buyer);
+      const buyerCustomerId = await upsertCustomerByPhone(trx, ownerId, { name: body.buyer.name, phone: body.buyer.phone });
       if (!buyerCustomerId) throw new AppError(400, 'VALIDATION', 'buyer.phone: must contain at least 7 digits.');
       return issueGiftCard(trx, {
         ownerId,
@@ -429,7 +429,7 @@ export const giftCardRoutes: FastifyPluginAsync = async (app) => {
     const { card, alreadyRedeemed } = await redeemGiftCard(
       db,
       claims.ownerScopeId,
-      { code: req.params.code, externalRef: body.externalRef, amountUsedCop: body.amountUsedCop, customer: body.customer, date: body.date },
+      { code: req.params.code, externalRef: body.externalRef, amountUsedCop: body.amountUsedCop, customer: body.customer ? { name: body.customer.name, phone: body.customer.phone } : null, date: body.date },
       actor,
     );
     return { ok: true, data: { ...toGiftCardDto(card, await publicBase(claims.ownerScopeId)), alreadyRedeemed } };

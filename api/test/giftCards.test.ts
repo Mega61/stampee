@@ -396,3 +396,25 @@ describe('scope', () => {
     expect(await ids('111 2233')).toEqual([a.id]);
   });
 });
+
+describe('listGiftCardsForCustomer', () => {
+  it('returns buyer and recipient cards, public-safe, without void ones', async () => {
+    const bought = await order();
+    const buyerId = bought.buyerCustomerId as string;
+    const voided = await order();
+    await post(`/gift-cards/${voided.id}/void`, { reason: 'x' });
+    const received = await order({ buyer: { name: 'Luisa', phone: '3109998877' } });
+    await activate(received.id, { paidAt: lib.bogotaDate() });
+    await redeem(received.code, { customer: { name: 'Ana', phone: '300 111 2233' } });
+
+    const list = await lib.listGiftCardsForCustomer(kdb, owner.userId, buyerId);
+    expect(list.map((c) => [c.id, c.role])).toEqual([
+      [received.id, 'recipient'],
+      [bought.id, 'buyer'],
+    ]);
+    expect(list[0]!.publicUrl).toBe(received.publicUrl);
+    expect(JSON.stringify(list)).not.toMatch(/phone|CustomerId|paidRef/i);
+    expect(await lib.listGiftCardsForCustomer(kdb, owner.userId, 'nobody')).toEqual([]);
+  });
+});
+
